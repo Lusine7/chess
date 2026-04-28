@@ -1,59 +1,78 @@
 /*
- * test_chess.c — Unit tests for board.c, moves.c, and eval.c
+ * test_chess.c — Unit tests for the chess engine.
  *
- * Build & run:
+ * Build and run:
  *   make test
  *
- * Uses a minimal hand-rolled test framework — no external dependencies.
+ * No external framework — a tiny macro harness is defined below.
+ * Each TEST() function is registered in main() and run in order.
+ * The suite prints a summary and exits with 0 (all pass) or 1 (any fail).
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "board.h"
 #include "moves.h"
 #include "eval.h"
+#include "ai.h"
 
-/* ------------------------------------------------------------------ */
-/*  Minimal test framework                                              */
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
+/*  Minimal test harness                                               */
+/* ================================================================== */
 
-static int tests_run    = 0;
-static int tests_passed = 0;
-static int tests_failed = 0;
+static int _total  = 0;
+static int _passed = 0;
+static int _failed = 0;
+static const char *_current_suite = "";
 
-#define ASSERT(cond, msg) do {                                          \
-    tests_run++;                                                        \
-    if (cond) {                                                         \
-        tests_passed++;                                                 \
-        printf("  [PASS] %s\n", msg);                                  \
-    } else {                                                            \
-        tests_failed++;                                                 \
-        printf("  [FAIL] %s  (line %d)\n", msg, __LINE__);            \
-    }                                                                   \
-} while (0)
+#define SUITE(name)  do { _current_suite = (name); \
+                          printf("\n── %s\n", _current_suite); } while(0)
 
-#define SECTION(name) printf("\n=== %s ===\n", name)
+#define CHECK(expr) do {                                              \
+    _total++;                                                         \
+    if (expr) {                                                       \
+        _passed++;                                                    \
+        printf("  ✓  %s\n", #expr);                                  \
+    } else {                                                          \
+        _failed++;                                                    \
+        printf("  ✗  %s  ← FAILED (%s:%d)\n", #expr, __FILE__, __LINE__); \
+    }                                                                 \
+} while(0)
 
-/* ------------------------------------------------------------------ */
-/*  Helper: count moves from a particular square                       */
-/* ------------------------------------------------------------------ */
-static int count_moves_from(Board *b, int rank, int file) {
+#define CHECK_EQ(a,b) do {                                            \
+    _total++;                                                         \
+    int _a = (int)(a), _b = (int)(b);                                \
+    if (_a == _b) {                                                   \
+        _passed++;                                                    \
+        printf("  ✓  %s == %d\n", #a, _b);                          \
+    } else {                                                          \
+        _failed++;                                                    \
+        printf("  ✗  %s: expected %d, got %d  (%s:%d)\n",           \
+               #a, _b, _a, __FILE__, __LINE__);                      \
+    }                                                                 \
+} while(0)
+
+/* ================================================================== */
+/*  Helpers                                                            */
+/* ================================================================== */
+
+/* Count legal moves for one specific piece on the board. */
+static int legal_moves_from(Board *b, int rank, int file) {
     Move moves[MAX_MOVES];
-    int n = generate_legal_moves(b, moves);
-    int c = 0;
+    int  n = generate_legal_moves(b, moves);
+    int  c = 0;
     for (int i = 0; i < n; i++)
         if (moves[i].from_rank == rank && moves[i].from_file == file)
             c++;
     return c;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Helper: find a legal move from->to                                 */
-/* ------------------------------------------------------------------ */
+/* Return 1 if the given destination exists among legal moves from sq. */
 static int has_legal_move(Board *b, int fr, int ff, int tr, int tf) {
     Move moves[MAX_MOVES];
-    int n = generate_legal_moves(b, moves);
+    int  n = generate_legal_moves(b, moves);
     for (int i = 0; i < n; i++)
         if (moves[i].from_rank == fr && moves[i].from_file == ff &&
             moves[i].to_rank   == tr && moves[i].to_file   == tf)
@@ -61,316 +80,888 @@ static int has_legal_move(Board *b, int fr, int ff, int tr, int tf) {
     return 0;
 }
 
+/* Clear the board (keep metadata intact). */
+static void clear_pieces(Board *b) {
+    memset(b->squares, 0, sizeof(b->squares));
+}
+
+/* Place a piece and return pointer to its square for convenience. */
+static void place(Board *b, int rank, int file, int piece) {
+    b->squares[rank][file] = piece;
+}
+
 /* ================================================================== */
-/*  1. board.c tests                                                   */
+/*  board.c tests                                                      */
 /* ================================================================== */
 
-static void test_board_init(void) {
-    SECTION("board_init");
+static void test_board_init_piece_positions(void) {
+    SUITE("board_init — piece positions");
     Board b;
     board_init(&b);
 
-    ASSERT(b.turn == WHITE, "Initial turn is WHITE");
-    ASSERT(b.white_castle_k == 1, "White kingside castling right set");
-    ASSERT(b.white_castle_q == 1, "White queenside castling right set");
-    ASSERT(b.black_castle_k == 1, "Black kingside castling right set");
-    ASSERT(b.black_castle_q == 1, "Black queenside castling right set");
-    ASSERT(b.ep_rank == -1, "No en-passant at start");
-    ASSERT(b.ep_file == -1, "No en-passant file at start");
-    ASSERT(b.halfmove_clock == 0, "Halfmove clock starts at 0");
-    ASSERT(b.fullmove_number == 1, "Fullmove number starts at 1");
+    /* White back rank */
+    CHECK_EQ(b.squares[0][0],  ROOK);
+    CHECK_EQ(b.squares[0][1],  KNIGHT);
+    CHECK_EQ(b.squares[0][2],  BISHOP);
+    CHECK_EQ(b.squares[0][3],  QUEEN);
+    CHECK_EQ(b.squares[0][4],  KING);
+    CHECK_EQ(b.squares[0][5],  BISHOP);
+    CHECK_EQ(b.squares[0][6],  KNIGHT);
+    CHECK_EQ(b.squares[0][7],  ROOK);
 
-    /* Back ranks */
-    ASSERT(b.squares[0][0] ==  ROOK,   "a1 = white rook");
-    ASSERT(b.squares[0][1] ==  KNIGHT, "b1 = white knight");
-    ASSERT(b.squares[0][2] ==  BISHOP, "c1 = white bishop");
-    ASSERT(b.squares[0][3] ==  QUEEN,  "d1 = white queen");
-    ASSERT(b.squares[0][4] ==  KING,   "e1 = white king");
-    ASSERT(b.squares[7][4] == -KING,   "e8 = black king");
-    ASSERT(b.squares[7][3] == -QUEEN,  "d8 = black queen");
+    /* Black back rank */
+    CHECK_EQ(b.squares[7][0], -ROOK);
+    CHECK_EQ(b.squares[7][3], -QUEEN);
+    CHECK_EQ(b.squares[7][4], -KING);
 
     /* Pawns */
     for (int f = 0; f < 8; f++) {
-        ASSERT(b.squares[1][f] ==  PAWN, "White pawn on rank 2");
-        ASSERT(b.squares[6][f] == -PAWN, "Black pawn on rank 7");
+        CHECK(b.squares[1][f] == PAWN);
+        CHECK(b.squares[6][f] == -PAWN);
     }
 
-    /* Middle ranks empty */
+    /* Empty middle ranks */
     for (int r = 2; r <= 5; r++)
         for (int f = 0; f < 8; f++)
-            ASSERT(b.squares[r][f] == EMPTY, "Middle squares empty");
+            CHECK(b.squares[r][f] == EMPTY);
 }
 
-static void test_board_color_type(void) {
-    SECTION("board_color / board_type");
-    ASSERT(board_color( ROOK)  == WHITE, "White rook -> WHITE");
-    ASSERT(board_color(-ROOK)  == BLACK, "Black rook -> BLACK");
-    ASSERT(board_color(EMPTY)  == 0,     "Empty square -> 0");
-    ASSERT(board_type( QUEEN)  == QUEEN, "Positive piece type");
-    ASSERT(board_type(-QUEEN)  == QUEEN, "Negative piece type");
-    ASSERT(board_type(EMPTY)   == EMPTY, "Empty type");
-}
+static void test_board_init_metadata(void) {
+    SUITE("board_init — metadata");
+    Board b;
+    board_init(&b);
 
-static void test_sq_str_conversion(void) {
-    SECTION("sq_to_str / str_to_rank / str_to_file");
-    char buf[4];
-    sq_to_str(0, 0, buf); ASSERT(strcmp(buf, "a1") == 0, "a1 round-trip");
-    sq_to_str(7, 7, buf); ASSERT(strcmp(buf, "h8") == 0, "h8 round-trip");
-    sq_to_str(3, 4, buf); ASSERT(strcmp(buf, "e4") == 0, "e4 round-trip");
-
-    ASSERT(str_to_rank("e4") == 3, "str_to_rank e4 == 3");
-    ASSERT(str_to_file("e4") == 4, "str_to_file e4 == 4");
-    ASSERT(str_to_rank("a1") == 0, "str_to_rank a1 == 0");
-    ASSERT(str_to_file("h8") == 7, "str_to_file h8 == 7");
+    CHECK_EQ(b.turn,            WHITE);
+    CHECK_EQ(b.white_castle_k,  1);
+    CHECK_EQ(b.white_castle_q,  1);
+    CHECK_EQ(b.black_castle_k,  1);
+    CHECK_EQ(b.black_castle_q,  1);
+    CHECK_EQ(b.ep_rank,        -1);
+    CHECK_EQ(b.ep_file,        -1);
+    CHECK_EQ(b.halfmove_clock,  0);
+    CHECK_EQ(b.fullmove_number, 1);
 }
 
 static void test_copy_board(void) {
-    SECTION("copy_board");
+    SUITE("copy_board — independence");
     Board src, dst;
     board_init(&src);
-    src.squares[4][4] = QUEEN; /* mutate src */
     copy_board(&dst, &src);
-    ASSERT(dst.squares[4][4] == QUEEN, "copy_board copies squares");
-    ASSERT(dst.turn == src.turn,        "copy_board copies turn");
-    /* Verify independence */
-    dst.squares[4][4] = EMPTY;
-    ASSERT(src.squares[4][4] == QUEEN, "copy_board deep copy (independent)");
+
+    /* Mutating dst must not affect src */
+    dst.squares[3][3] = QUEEN;
+    CHECK(src.squares[3][3] == EMPTY);
+
+    dst.turn = BLACK;
+    CHECK_EQ(src.turn, WHITE);
+}
+
+static void test_sq_str_roundtrip(void) {
+    SUITE("sq_to_str / str_to_rank / str_to_file — round-trip");
+    for (int r = 0; r < 8; r++) {
+        for (int f = 0; f < 8; f++) {
+            char buf[3];
+            sq_to_str(r, f, buf);
+            CHECK(str_to_rank(buf) == r);
+            CHECK(str_to_file(buf) == f);
+        }
+    }
+}
+
+static void test_board_color_and_type(void) {
+    SUITE("board_color / board_type");
+    CHECK_EQ(board_color( QUEEN), WHITE);
+    CHECK_EQ(board_color(-QUEEN), BLACK);
+    CHECK_EQ(board_color( EMPTY), 0);
+    CHECK_EQ(board_type(  QUEEN), QUEEN);
+    CHECK_EQ(board_type( -QUEEN), QUEEN);
+    CHECK_EQ(board_type(  PAWN),  PAWN);
+    CHECK_EQ(board_type( -PAWN),  PAWN);
 }
 
 /* ================================================================== */
-/*  2. moves.c — move generation tests                                 */
+/*  moves.c — is_attacked                                              */
 /* ================================================================== */
 
-static void test_opening_move_count(void) {
-    SECTION("Opening position legal moves");
+static void test_pawn_attacks(void) {
+    SUITE("is_attacked — pawns");
     Board b;
     board_init(&b);
+    clear_pieces(&b);
+
+    /* White pawn on e4 (rank 3, file 4) attacks d5 and f5 */
+    place(&b, 3, 4, PAWN);
+    CHECK(is_attacked(&b, 4, 3, WHITE));   /* d5 attacked */
+    CHECK(is_attacked(&b, 4, 5, WHITE));   /* f5 attacked */
+    CHECK(!is_attacked(&b, 4, 4, WHITE));  /* e5 not attacked by pawn */
+    CHECK(!is_attacked(&b, 3, 4, WHITE));  /* own square not attacked */
+
+    /* Black pawn on e5 (rank 4, file 4) attacks d4 and f4 */
+    clear_pieces(&b);
+    place(&b, 4, 4, -PAWN);
+    CHECK(is_attacked(&b, 3, 3, BLACK));
+    CHECK(is_attacked(&b, 3, 5, BLACK));
+    CHECK(!is_attacked(&b, 3, 4, BLACK));
+}
+
+static void test_knight_attacks(void) {
+    SUITE("is_attacked — knights");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+
+    /* White knight on d4 (rank 3, file 3) */
+    place(&b, 3, 3, KNIGHT);
+    /* All 8 knight jumps */
+    CHECK(is_attacked(&b, 5, 4, WHITE));  /* +2,+1 */
+    CHECK(is_attacked(&b, 5, 2, WHITE));  /* +2,-1 */
+    CHECK(is_attacked(&b, 1, 4, WHITE));  /* -2,+1 */
+    CHECK(is_attacked(&b, 1, 2, WHITE));  /* -2,-1 */
+    CHECK(is_attacked(&b, 4, 5, WHITE));  /* +1,+2 */
+    CHECK(is_attacked(&b, 4, 1, WHITE));  /* +1,-2 */
+    CHECK(is_attacked(&b, 2, 5, WHITE));  /* -1,+2 */
+    CHECK(is_attacked(&b, 2, 1, WHITE));  /* -1,-2 */
+    /* Non-attacked squares */
+    CHECK(!is_attacked(&b, 3, 4, WHITE));
+    CHECK(!is_attacked(&b, 5, 3, WHITE));
+}
+
+static void test_bishop_attacks(void) {
+    SUITE("is_attacked — bishops");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+
+    /* White bishop on c1 (rank 0, file 2) */
+    place(&b, 0, 2, BISHOP);
+    CHECK(is_attacked(&b, 1, 3, WHITE));   /* diagonal d2 */
+    CHECK(is_attacked(&b, 4, 6, WHITE));   /* diagonal g5 */
+    CHECK(!is_attacked(&b, 0, 3, WHITE));  /* same rank, not diagonal */
+
+    /* Blocker cuts off the diagonal */
+    place(&b, 2, 4, PAWN);                 /* blocker on e3 */
+    CHECK(is_attacked(&b, 2, 4, WHITE));   /* can still see the blocker */
+    CHECK(!is_attacked(&b, 3, 5, WHITE));  /* blocked beyond it */
+}
+
+static void test_rook_attacks(void) {
+    SUITE("is_attacked — rooks");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+
+    /* White rook on a1 (rank 0, file 0) */
+    place(&b, 0, 0, ROOK);
+    CHECK(is_attacked(&b, 0, 7, WHITE));  /* same rank, far end */
+    CHECK(is_attacked(&b, 7, 0, WHITE));  /* same file, far end */
+    CHECK(!is_attacked(&b, 1, 1, WHITE)); /* diagonal — not attacked */
+
+    /* Blocker on a4 (rank 3, file 0) */
+    place(&b, 3, 0, PAWN);
+    CHECK(is_attacked(&b, 3, 0, WHITE));  /* sees the blocker */
+    CHECK(!is_attacked(&b, 7, 0, WHITE)); /* blocked beyond */
+}
+
+static void test_queen_attacks(void) {
+    SUITE("is_attacked — queen (combines rook + bishop)");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+
+    /* Queen on d4 (rank 3, file 3) */
+    place(&b, 3, 3, QUEEN);
+    CHECK(is_attacked(&b, 3, 7, WHITE)); /* same rank */
+    CHECK(is_attacked(&b, 7, 3, WHITE)); /* same file */
+    CHECK(is_attacked(&b, 6, 6, WHITE)); /* diagonal */
+    CHECK(is_attacked(&b, 0, 0, WHITE)); /* anti-diagonal */
+    CHECK(!is_attacked(&b, 5, 4, WHITE));/* knight-jump — not attacked */
+}
+
+static void test_king_attacks(void) {
+    SUITE("is_attacked — king");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+
+    /* White king on e4 (rank 3, file 4) */
+    place(&b, 3, 4, KING);
+    for (int dr = -1; dr <= 1; dr++)
+        for (int df = -1; df <= 1; df++) {
+            if (dr == 0 && df == 0) continue;
+            CHECK(is_attacked(&b, 3+dr, 4+df, WHITE));
+        }
+    CHECK(!is_attacked(&b, 3, 6, WHITE)); /* two files away */
+    CHECK(!is_attacked(&b, 5, 4, WHITE)); /* two ranks away */
+}
+
+/* ================================================================== */
+/*  moves.c — legal move counts                                        */
+/* ================================================================== */
+
+static void test_starting_position_move_count(void) {
+    SUITE("generate_legal_moves — starting position");
+    Board b;
+    board_init(&b);
+
     Move moves[MAX_MOVES];
     int n = generate_legal_moves(&b, moves);
-    /* Standard chess: 20 legal opening moves for White */
-    ASSERT(n == 20, "White has 20 legal moves at start");
-
-    /* Make one pawn move then check Black */
-    Move e2e4 = {1, 4, 3, 4, 0};
-    apply_move(&b, &e2e4);
-    n = generate_legal_moves(&b, moves);
-    ASSERT(n == 20, "Black has 20 legal moves after 1.e4");
+    CHECK_EQ(n, 20); /* 16 pawn + 4 knight moves */
 }
 
-static void test_pawn_single_double_push(void) {
-    SECTION("Pawn single/double push");
+static void test_pawn_starting_double_push(void) {
+    SUITE("pawn — double push from starting rank");
     Board b;
     board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
 
-    /* e2 pawn: 1 single push + 1 double push = 2 moves */
-    ASSERT(count_moves_from(&b, 1, 4) == 2, "e2 pawn has 2 moves");
-    ASSERT(has_legal_move(&b, 1, 4, 2, 4),  "e2-e3 legal");
-    ASSERT(has_legal_move(&b, 1, 4, 3, 4),  "e2-e4 legal");
+    place(&b, 1, 4, PAWN);   /* white pawn on e2 */
+    place(&b, 0, 4, KING);   /* kings required to avoid crashes in legality */
+    place(&b, 7, 4, -KING);
+
+    int n = legal_moves_from(&b, 1, 4);
+    CHECK_EQ(n, 2); /* e3 and e4 */
+    CHECK(has_legal_move(&b, 1, 4, 2, 4)); /* e3 */
+    CHECK(has_legal_move(&b, 1, 4, 3, 4)); /* e4 */
 }
 
-static void test_knight_moves(void) {
-    SECTION("Knight moves");
+static void test_pawn_blocked_no_double_push(void) {
+    SUITE("pawn — blocker prevents double push");
     Board b;
     board_init(&b);
-    /* b1 knight can go to a3 or c3 (2 moves in opening) */
-    ASSERT(count_moves_from(&b, 0, 1) == 2, "b1 knight has 2 moves at start");
-    ASSERT(has_legal_move(&b, 0, 1, 2, 0),  "Nb1-a3 legal");
-    ASSERT(has_legal_move(&b, 0, 1, 2, 2),  "Nb1-c3 legal");
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    place(&b, 1, 4, PAWN);
+    place(&b, 2, 4, -PAWN);  /* blocker on e3 */
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
+
+    int n = legal_moves_from(&b, 1, 4);
+    CHECK_EQ(n, 0);
 }
 
-static void test_is_attacked(void) {
-    SECTION("is_attacked");
+static void test_pawn_capture(void) {
+    SUITE("pawn — diagonal capture");
     Board b;
     board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
 
-    /* e4 square is not attacked by black at start */
-    ASSERT(!is_attacked(&b, 3, 4, BLACK), "e4 not attacked by black at start");
+    place(&b, 3, 3, PAWN);    /* white pawn on d4 */
+    place(&b, 4, 4, -PAWN);   /* black pawn on e5 — capturable */
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
 
-    /* After 1.e4, d5 is attacked by the white pawn on e4 */
-    Move e4 = {1, 4, 3, 4, 0};
-    apply_move(&b, &e4);
-    ASSERT(is_attacked(&b, 4, 3, WHITE), "d5 attacked by white pawn on e4");
-    ASSERT(is_attacked(&b, 4, 5, WHITE), "f5 attacked by white pawn on e4");
-}
-
-static void test_is_in_check(void) {
-    SECTION("is_in_check");
-    /* Manually construct Scholar's-mate position where Black is in checkmate */
-    Board b;
-    memset(&b, 0, sizeof(b));
-    /* Place kings */
-    b.squares[0][4] =  KING;
-    b.squares[7][4] = -KING;
-    /* White queen on f7 attacks black king */
-    b.squares[6][5] =  QUEEN;
-    b.turn = BLACK;
-
-    ASSERT(is_in_check(&b, BLACK), "Black in check from queen on f7");
-    ASSERT(!is_in_check(&b, WHITE), "White not in check");
+    CHECK(has_legal_move(&b, 3, 3, 4, 4)); /* capture e5 */
+    CHECK(has_legal_move(&b, 3, 3, 4, 3)); /* push to d5 */
+    CHECK(!has_legal_move(&b, 3, 3, 4, 2)); /* no piece to capture there */
 }
 
 static void test_en_passant(void) {
-    SECTION("En-passant");
+    SUITE("pawn — en passant");
     Board b;
     board_init(&b);
-
-    /* 1.e4 d5  2.e5  — now push f5 for black to allow ep */
-    Move e4   = {1,4,3,4,0};  apply_move(&b, &e4);
-    Move d5   = {6,3,4,3,0};  apply_move(&b, &d5);
-    Move e5   = {3,4,4,4,0};  apply_move(&b, &e5);
-    Move f5   = {6,5,4,5,0};  apply_move(&b, &f5);
-
-    /* White pawn on e5 can capture en-passant on f6 */
-    ASSERT(b.ep_rank == 5 && b.ep_file == 5, "EP target set to f6");
-    ASSERT(has_legal_move(&b, 4,4, 5,5), "White can capture en-passant exf6");
-
-    /* Apply ep capture and verify black pawn removed */
-    Move ep = {4,4,5,5,0};
-    apply_move(&b, &ep);
-    ASSERT(b.squares[4][5] == EMPTY, "Captured pawn removed by en-passant");
-    ASSERT(b.squares[5][5] == PAWN,  "White pawn moved to f6");
-}
-
-static void test_castling(void) {
-    SECTION("Castling");
-    Board b;
-    board_init(&b);
-
-    /* Clear squares for white kingside castle */
-    b.squares[0][5] = EMPTY; /* f1 */
-    b.squares[0][6] = EMPTY; /* g1 */
-
-    ASSERT(has_legal_move(&b, 0,4, 0,6), "White kingside castle available");
-
-    Move castle = {0,4,0,6,0};
-    apply_move(&b, &castle);
-    ASSERT(b.squares[0][6] ==  KING, "King moved to g1");
-    ASSERT(b.squares[0][5] ==  ROOK, "Rook moved to f1");
-    ASSERT(b.squares[0][7] == EMPTY, "h1 empty after castle");
-    ASSERT(b.white_castle_k == 0,    "White kingside right revoked");
-    ASSERT(b.white_castle_q == 0,    "White queenside right revoked");
-}
-
-static void test_promotion(void) {
-    SECTION("Pawn promotion");
-    Board b;
-    memset(&b, 0, sizeof(b));
-    b.squares[0][4] =  KING;
-    b.squares[7][4] = -KING;
-    /* White pawn one step from promotion */
-    b.squares[6][0] = PAWN;
+    clear_pieces(&b);
     b.turn = WHITE;
 
-    Move moves[MAX_MOVES];
-    int n = generate_legal_moves(&b, moves);
-    /* Should produce 4 promotion moves */
-    int promo_count = 0;
-    for (int i = 0; i < n; i++)
-        if (moves[i].from_rank == 6 && moves[i].from_file == 0 &&
-            moves[i].to_rank   == 7)
-            promo_count++;
-    ASSERT(promo_count == 4, "Pawn at a7 generates 4 promotion moves");
+    /* White pawn on e5, black pawn just double-pushed to d5 */
+    place(&b, 4, 4, PAWN);    /* e5 */
+    place(&b, 4, 3, -PAWN);   /* d5 (just landed) */
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
+    b.ep_rank = 5;             /* en-passant target: d6 */
+    b.ep_file = 3;
 
-    /* Apply queen promotion */
-    Move promo_q = {6,0,7,0,QUEEN};
-    apply_move(&b, &promo_q);
-    ASSERT(b.squares[7][0] == QUEEN, "Pawn promoted to queen");
+    CHECK(has_legal_move(&b, 4, 4, 5, 3)); /* white captures en passant */
+
+    /* After en passant, captured pawn must be removed */
+    Move m = { 4, 4, 5, 3, 0 };
+    apply_move(&b, &m);
+    CHECK_EQ(b.squares[4][3], EMPTY);  /* d5 pawn removed */
+    CHECK_EQ(b.squares[5][3], PAWN);   /* white pawn on d6 */
 }
 
-static void test_checkmate_no_moves(void) {
-    SECTION("Checkmate / stalemate move count");
-    /* Fool's mate position: Black is checkmated */
+static void test_en_passant_expires(void) {
+    SUITE("pawn — en passant not available after one move");
     Board b;
     board_init(&b);
-    /* 1.f3 e5  2.g4 Qh4# */
-    apply_move(&b, &(Move){1,5,2,5,0}); /* f3  (f2-f3) */
-    apply_move(&b, &(Move){6,4,4,4,0}); /* e5  (e7-e5) */
-    apply_move(&b, &(Move){1,6,3,6,0}); /* g4  (g2-g4) */
-    apply_move(&b, &(Move){7,3,3,7,0}); /* Qh4 (d8-h4) — rank index 3 = chess rank 4 */
+    clear_pieces(&b);
 
-    /* Now it's White's turn and White is in checkmate */
-    Move moves[MAX_MOVES];
-    int n = generate_legal_moves(&b, moves);
-    ASSERT(n == 0,                    "White has 0 moves in Fool's mate");
-    ASSERT(is_in_check(&b, WHITE),    "White is in check in Fool's mate");
+    place(&b, 4, 4, PAWN);
+    place(&b, 4, 3, -PAWN);
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
+    b.ep_rank = 5;
+    b.ep_file = 3;
+    b.turn    = WHITE;
+
+    /* White makes a different move (pawn push) */
+    Move other = { 4, 4, 5, 4, 0 };  /* e5→e6 */
+    apply_move(&b, &other);
+
+    /* Now it's black's turn — ep target must have been cleared */
+    CHECK_EQ(b.ep_rank, -1);
+    CHECK_EQ(b.ep_file, -1);
+}
+
+static void test_promotion_generates_four_moves(void) {
+    SUITE("pawn — promotion generates 4 variants");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    place(&b, 6, 4, PAWN);    /* white pawn on e7, one push from promotion */
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
+
+    int n = legal_moves_from(&b, 6, 4);
+    CHECK_EQ(n, 4);  /* Q, R, B, N */
+}
+
+static void test_promotion_applies_correctly(void) {
+    SUITE("pawn — promotion sets correct piece on board");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    place(&b, 6, 0, PAWN);    /* a7 */
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
+
+    Move m = { 6, 0, 7, 0, QUEEN };
+    apply_move(&b, &m);
+    CHECK_EQ(b.squares[7][0], QUEEN);  /* white queen on a8 */
+    CHECK_EQ(b.squares[6][0], EMPTY);
+
+    /* Black promotion */
+    clear_pieces(&b);
+    b.turn = BLACK;
+    place(&b, 1, 0, -PAWN);   /* a2 */
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
+    Move m2 = { 1, 0, 0, 0, KNIGHT };
+    apply_move(&b, &m2);
+    CHECK_EQ(b.squares[0][0], -KNIGHT); /* black knight on a1 */
 }
 
 /* ================================================================== */
-/*  3. eval.c tests                                                    */
+/*  moves.c — castling                                                  */
 /* ================================================================== */
 
-static void test_eval_initial_symmetry(void) {
-    SECTION("evaluate — initial position symmetry");
+static void test_castling_kingside_white(void) {
+    SUITE("castling — white kingside");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    /* Only king and rook, path clear */
+    place(&b, 0, 4, KING);
+    place(&b, 0, 7, ROOK);
+    place(&b, 7, 4, -KING);
+
+    CHECK(has_legal_move(&b, 0, 4, 0, 6)); /* castle kingside */
+
+    Move m = { 0, 4, 0, 6, 0 };
+    apply_move(&b, &m);
+    CHECK_EQ(b.squares[0][6], KING); /* king on g1 */
+    CHECK_EQ(b.squares[0][5], ROOK); /* rook on f1 */
+    CHECK_EQ(b.squares[0][7], EMPTY);
+    CHECK_EQ(b.squares[0][4], EMPTY);
+}
+
+static void test_castling_queenside_white(void) {
+    SUITE("castling — white queenside");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    place(&b, 0, 4, KING);
+    place(&b, 0, 0, ROOK);
+    place(&b, 7, 4, -KING);
+
+    CHECK(has_legal_move(&b, 0, 4, 0, 2));
+
+    Move m = { 0, 4, 0, 2, 0 };
+    apply_move(&b, &m);
+    CHECK_EQ(b.squares[0][2], KING);  /* king on c1 */
+    CHECK_EQ(b.squares[0][3], ROOK);  /* rook on d1 */
+    CHECK_EQ(b.squares[0][0], EMPTY);
+}
+
+static void test_castling_blocked(void) {
+    SUITE("castling — blocked by piece between king and rook");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    place(&b, 0, 4, KING);
+    place(&b, 0, 7, ROOK);
+    place(&b, 0, 5, BISHOP);  /* blocks f1 */
+    place(&b, 7, 4, -KING);
+
+    CHECK(!has_legal_move(&b, 0, 4, 0, 6));
+}
+
+static void test_castling_through_check(void) {
+    SUITE("castling — cannot castle through attacked square");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    place(&b, 0, 4, KING);
+    place(&b, 0, 7, ROOK);
+    place(&b, 7, 4, -KING);
+    place(&b, 5, 5, -ROOK);   /* black rook attacks f1 (0,5) */
+
+    CHECK(!has_legal_move(&b, 0, 4, 0, 6));
+}
+
+static void test_castling_out_of_check(void) {
+    SUITE("castling — cannot castle while in check");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    place(&b, 0, 4, KING);
+    place(&b, 0, 7, ROOK);
+    place(&b, 7, 4, -KING);
+    place(&b, 5, 4, -ROOK);   /* black rook puts king in check on e1 */
+
+    CHECK(!has_legal_move(&b, 0, 4, 0, 6));
+}
+
+static void test_castling_rights_revoked_after_king_moves(void) {
+    SUITE("castling — rights revoked after king moves");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    place(&b, 0, 4, KING);
+    place(&b, 0, 7, ROOK);
+    place(&b, 0, 0, ROOK);
+    place(&b, 7, 4, -KING);
+
+    /* King steps to f1 and back to e1 */
+    Move m1 = { 0, 4, 0, 5, 0 };
+    apply_move(&b, &m1);
+    b.turn = WHITE; /* skip black's turn for this test */
+    Move m2 = { 0, 5, 0, 4, 0 };
+    apply_move(&b, &m2);
+    b.turn = WHITE;
+
+    CHECK(!has_legal_move(&b, 0, 4, 0, 6)); /* no kingside castle */
+    CHECK(!has_legal_move(&b, 0, 4, 0, 2)); /* no queenside castle */
+}
+
+static void test_castling_black(void) {
+    SUITE("castling — black kingside");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn            = BLACK;
+    b.black_castle_k  = 1;
+    b.black_castle_q  = 1;
+
+    place(&b, 7, 4, -KING);
+    place(&b, 7, 7, -ROOK);
+    place(&b, 0, 4,  KING);
+
+    CHECK(has_legal_move(&b, 7, 4, 7, 6));
+
+    Move m = { 7, 4, 7, 6, 0 };
+    apply_move(&b, &m);
+    CHECK_EQ(b.squares[7][6], -KING);
+    CHECK_EQ(b.squares[7][5], -ROOK);
+}
+
+/* ================================================================== */
+/*  moves.c — check, checkmate, stalemate                              */
+/* ================================================================== */
+
+static void test_is_in_check(void) {
+    SUITE("is_in_check");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+
+    /* White king attacked by black rook on same file */
+    place(&b, 0, 4,  KING);
+    place(&b, 7, 4, -KING);
+    place(&b, 5, 4, -ROOK);
+
+    CHECK(is_in_check(&b, WHITE));
+    CHECK(!is_in_check(&b, BLACK));
+}
+
+static void test_checkmate_back_rank(void) {
+    SUITE("generate_legal_moves — checkmate (back-rank)");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    /* White king trapped on h1, two black rooks cover all escapes */
+    place(&b, 0, 7,  KING);
+    place(&b, 7, 0, -KING);
+    place(&b, 1, 0, -ROOK);   /* covers rank 1 */
+    place(&b, 0, 0, -ROOK);   /* covers rank 0 (except where king is) */
+
+    Move moves[MAX_MOVES];
+    int n = generate_legal_moves(&b, moves);
+    CHECK_EQ(n, 0);
+    CHECK(is_in_check(&b, WHITE));
+}
+
+static void test_stalemate(void) {
+    SUITE("generate_legal_moves — stalemate");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = BLACK;
+
+    /* Classic stalemate: black king in corner, white controls all moves */
+    place(&b, 7, 7, -KING);
+    place(&b, 5, 6,  QUEEN);
+    place(&b, 5, 7,  KING);
+
+    Move moves[MAX_MOVES];
+    int n = generate_legal_moves(&b, moves);
+    CHECK_EQ(n, 0);
+    CHECK(!is_in_check(&b, BLACK));
+}
+
+static void test_pinned_piece_cannot_move(void) {
+    SUITE("legal moves — pinned piece cannot expose king");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    /* White king e1, white rook e4, black rook e8 — rook is pinned */
+    place(&b, 0, 4, KING);
+    place(&b, 3, 4, ROOK);   /* white rook on e4 — pinned to king */
+    place(&b, 7, 4, -ROOK);  /* black rook on e8 pins it */
+    place(&b, 6, 0, -KING);
+
+    /* Pinned rook may only move along the pin ray (same file) */
+    int n = legal_moves_from(&b, 3, 4);
+    /* Allowed: e2, e3, e5, e6, e7, e8(capture) = 6 squares along e-file */
+    /* Not allowed: any move off the e-file */
+    CHECK(has_legal_move(&b, 3, 4, 1, 4));   /* e2 — along pin */
+    CHECK(has_legal_move(&b, 3, 4, 7, 4));   /* capture e8 — along pin */
+    CHECK(!has_legal_move(&b, 3, 4, 3, 0));  /* a4 — breaks pin */
+    CHECK(!has_legal_move(&b, 3, 4, 3, 7));  /* h4 — breaks pin */
+    (void)n;
+}
+
+/* ================================================================== */
+/*  moves.c — apply_move side effects                                  */
+/* ================================================================== */
+
+static void test_apply_move_halfmove_clock(void) {
+    SUITE("apply_move — halfmove clock");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    place(&b, 0, 4, KING);
+    place(&b, 0, 0, ROOK);
+    place(&b, 7, 4, -KING);
+
+    /* Rook move (quiet) increments clock */
+    Move m = { 0, 0, 0, 1, 0 };
+    apply_move(&b, &m);
+    CHECK_EQ(b.halfmove_clock, 1);
+
+    /* Pawn move resets it */
+    b.turn = WHITE;
+    place(&b, 1, 0, PAWN);
+    Move m2 = { 1, 0, 2, 0, 0 };
+    apply_move(&b, &m2);
+    CHECK_EQ(b.halfmove_clock, 0);
+}
+
+static void test_apply_move_fullmove_counter(void) {
+    SUITE("apply_move — fullmove counter increments after black's move");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+
+    place(&b, 0, 4,  KING);
+    place(&b, 7, 4, -KING);
+    place(&b, 6, 0, -PAWN);
+
+    CHECK_EQ(b.fullmove_number, 1);
+
+    /* White move — counter stays */
+    b.turn = WHITE;
+    Move m1 = { 0, 4, 0, 3, 0 };
+    apply_move(&b, &m1);
+    CHECK_EQ(b.fullmove_number, 1);
+
+    /* Black move — counter increments */
+    Move m2 = { 6, 0, 5, 0, 0 };
+    apply_move(&b, &m2);
+    CHECK_EQ(b.fullmove_number, 2);
+}
+
+static void test_apply_move_turn_flips(void) {
+    SUITE("apply_move — turn alternates");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    place(&b, 0, 4,  KING);
+    place(&b, 7, 4, -KING);
+
+    Move m = { 0, 4, 0, 3, 0 };
+    apply_move(&b, &m);
+    CHECK_EQ(b.turn, BLACK);
+    apply_move(&b, (Move[]){ {7, 4, 7, 3, 0} });
+    CHECK_EQ(b.turn, WHITE);
+}
+
+/* ================================================================== */
+/*  eval.c tests                                                       */
+/* ================================================================== */
+
+static void test_eval_starting_position_symmetric(void) {
+    SUITE("evaluate — starting position is 0");
     Board b;
     board_init(&b);
     int score = evaluate(&b);
-    ASSERT(score == 0, "Initial position evaluates to 0 (symmetric)");
+    CHECK_EQ(score, 0);
 }
 
 static void test_eval_material_advantage(void) {
-    SECTION("evaluate — material advantage");
+    SUITE("evaluate — removing a piece shifts score");
     Board b;
     board_init(&b);
 
-    /* Remove a black pawn — white should now have a positive score */
-    b.squares[6][0] = EMPTY;
+    /* Remove black queen → white advantage */
+    b.squares[7][3] = EMPTY;
     int score = evaluate(&b);
-    ASSERT(score > 0, "White ahead by one pawn: score > 0");
+    CHECK(score > 0);
 
-    /* Remove a white queen too — black should now be clearly ahead */
+    /* Remove white queen too → back to roughly balanced */
     b.squares[0][3] = EMPTY;
-    score = evaluate(&b);
-    ASSERT(score < 0, "Black ahead after white loses queen: score < 0");
+    int score2 = evaluate(&b);
+    /* Should be close to 0 (small PST asymmetry possible) */
+    CHECK(score2 > -50 && score2 < 50);
 }
 
-static void test_eval_empty_board_kings(void) {
-    SECTION("evaluate — symmetric kings-only board");
+static void test_eval_extra_queen_large_advantage(void) {
+    SUITE("evaluate — extra queen is a large material advantage");
     Board b;
-    memset(&b, 0, sizeof(b));
-    b.squares[0][4] =  KING;
-    b.squares[7][4] = -KING;
-    b.turn = WHITE;
-    /* Kings only — score depends only on PST mirroring, should be 0 */
+    board_init(&b);
+    clear_pieces(&b);
+
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
+    place(&b, 3, 3, QUEEN);   /* extra white queen */
+
     int score = evaluate(&b);
-    ASSERT(score == 0, "Symmetric kings-only board scores 0");
+    CHECK(score > 800);  /* queen = ~900 cp; PST may adjust slightly */
+}
+
+static void test_eval_pst_center_pawn_better(void) {
+    SUITE("evaluate — central pawn scores higher than edge pawn (PST)");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+
+    /* White pawn on e4 (rank 3, file 4) vs a2 (rank 1, file 0) */
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
+
+    place(&b, 3, 4, PAWN);    /* e4 */
+    int score_center = evaluate(&b);
+
+    b.squares[3][4] = EMPTY;
+    place(&b, 1, 0, PAWN);    /* a2 */
+    int score_edge = evaluate(&b);
+
+    CHECK(score_center > score_edge);
 }
 
 /* ================================================================== */
-/*  main                                                                */
+/*  ai.c tests                                                         */
 /* ================================================================== */
+
+static void test_ai_no_moves_returns_zero(void) {
+    SUITE("find_best_move — returns 0 in checkmate position");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = WHITE;
+
+    /* White is in checkmate */
+    place(&b, 0, 7,  KING);
+    place(&b, 7, 0, -KING);
+    place(&b, 1, 0, -ROOK);
+    place(&b, 0, 0, -ROOK);
+
+    Move best;
+    int ok = find_best_move(&b, &best);
+    CHECK_EQ(ok, 0);
+}
+
+static void test_ai_takes_free_piece(void) {
+    SUITE("find_best_move — captures an undefended piece at depth 1");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn    = WHITE;
+    ai_depth  = 1;
+
+    /* White rook can capture an undefended black queen */
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
+    place(&b, 3, 0, ROOK);     /* white rook on a4 */
+    place(&b, 3, 7, -QUEEN);   /* black queen on h4 — free */
+
+    Move best;
+    int ok = find_best_move(&b, &best);
+    CHECK_EQ(ok, 1);
+    CHECK_EQ(best.from_rank, 3);
+    CHECK_EQ(best.from_file, 0);
+    CHECK_EQ(best.to_rank,   3);
+    CHECK_EQ(best.to_file,   7); /* captured the queen */
+}
+
+static void test_ai_finds_checkmate_in_one(void) {
+    SUITE("find_best_move — finds mate in 1");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn   = WHITE;
+    ai_depth = 2;
+
+    /*
+     * White to move.  Qh7# delivers checkmate:
+     *   Black king on h8, white queen on g6, white rook on g1.
+     *   Qh7 is checkmate (rook covers g-file, queen covers h7+h6).
+     */
+    place(&b, 7, 7, -KING);   /* h8 */
+    place(&b, 5, 6,  QUEEN);  /* g6 */
+    place(&b, 0, 6,  ROOK);   /* g1 */
+    place(&b, 0, 0,  KING);   /* a1 */
+
+    Move best;
+    int ok = find_best_move(&b, &best);
+    CHECK_EQ(ok, 1);
+    /* The mating move is Qh7 (rank 6, file 7) */
+    CHECK(best.from_rank == 5 && best.from_file == 6 &&
+          best.to_rank   == 6 && best.to_file   == 7);
+}
+
+static void test_ai_move_does_not_leave_king_in_check(void) {
+    SUITE("find_best_move — chosen move never leaves own king in check");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn   = WHITE;
+    ai_depth = 3;
+
+    /*
+     * White king is attacked; AI must block or move king.
+     * White: king e1, rook a1.  Black: king h8, rook e8 (giving check).
+     */
+    place(&b, 0, 4,  KING);
+    place(&b, 0, 0,  ROOK);
+    place(&b, 7, 7, -KING);
+    place(&b, 7, 4, -ROOK);   /* check on e-file */
+
+    Move best;
+    int ok = find_best_move(&b, &best);
+    CHECK_EQ(ok, 1);
+
+    /* Apply the move and verify white king is no longer in check */
+    Board after;
+    copy_board(&after, &b);
+    apply_move(&after, &best);
+    CHECK(!is_in_check(&after, WHITE));
+}
+
+/* ================================================================== */
+/*  main — register and run all tests                                  */
+/* ================================================================== */
+
+typedef void (*TestFn)(void);
+
+static const TestFn tests[] = {
+    /* board */
+    test_board_init_piece_positions,
+    test_board_init_metadata,
+    test_copy_board,
+    test_sq_str_roundtrip,
+    test_board_color_and_type,
+    /* is_attacked */
+    test_pawn_attacks,
+    test_knight_attacks,
+    test_bishop_attacks,
+    test_rook_attacks,
+    test_queen_attacks,
+    test_king_attacks,
+    /* legal moves */
+    test_starting_position_move_count,
+    test_pawn_starting_double_push,
+    test_pawn_blocked_no_double_push,
+    test_pawn_capture,
+    test_en_passant,
+    test_en_passant_expires,
+    test_promotion_generates_four_moves,
+    test_promotion_applies_correctly,
+    /* castling */
+    test_castling_kingside_white,
+    test_castling_queenside_white,
+    test_castling_blocked,
+    test_castling_through_check,
+    test_castling_out_of_check,
+    test_castling_rights_revoked_after_king_moves,
+    test_castling_black,
+    /* check / mate / stalemate */
+    test_is_in_check,
+    test_checkmate_back_rank,
+    test_stalemate,
+    test_pinned_piece_cannot_move,
+    /* apply_move side effects */
+    test_apply_move_halfmove_clock,
+    test_apply_move_fullmove_counter,
+    test_apply_move_turn_flips,
+    /* eval */
+    test_eval_starting_position_symmetric,
+    test_eval_material_advantage,
+    test_eval_extra_queen_large_advantage,
+    test_eval_pst_center_pawn_better,
+    /* ai */
+    test_ai_no_moves_returns_zero,
+    test_ai_takes_free_piece,
+    test_ai_finds_checkmate_in_one,
+    test_ai_move_does_not_leave_king_in_check,
+};
 
 int main(void) {
-    printf("Chess Engine Unit Tests\n");
-    printf("=======================\n");
+    int n = (int)(sizeof(tests) / sizeof(tests[0]));
+    for (int i = 0; i < n; i++)
+        tests[i]();
 
-    /* board.c */
-    test_board_init();
-    test_board_color_type();
-    test_sq_str_conversion();
-    test_copy_board();
+    printf("\n══════════════════════════════════\n");
+    printf("  %d / %d passed", _passed, _total);
+    if (_failed)
+        printf("   (%d FAILED)", _failed);
+    printf("\n══════════════════════════════════\n");
 
-    /* moves.c */
-    test_opening_move_count();
-    test_pawn_single_double_push();
-    test_knight_moves();
-    test_is_attacked();
-    test_is_in_check();
-    test_en_passant();
-    test_castling();
-    test_promotion();
-    test_checkmate_no_moves();
-
-    /* eval.c */
-    test_eval_initial_symmetry();
-    test_eval_material_advantage();
-    test_eval_empty_board_kings();
-
-    /* Summary */
-    printf("\n----------------------------\n");
-    printf("Results: %d/%d passed", tests_passed, tests_run);
-    if (tests_failed)
-        printf(", %d FAILED", tests_failed);
-    printf("\n");
-
-    return tests_failed > 0 ? 1 : 0;
+    return _failed ? 1 : 0;
 }
