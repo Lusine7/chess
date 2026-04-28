@@ -42,7 +42,7 @@ test: $(TEST_BIN)
 
 # Run Python unit tests (no binary required — uses unittest.mock)
 test_py:
-	$(PYTHON) -m unittest ../frontend/test_protocol.py -v
+	$(PYTHON) ../frontend/test_protocol.py -v
 
 # Run both C and Python test suites
 test_all: test test_py

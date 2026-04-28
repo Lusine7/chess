@@ -692,6 +692,42 @@ static void test_apply_move_halfmove_clock(void) {
     CHECK_EQ(b.halfmove_clock, 0);
 }
 
+static void test_fifty_move_rule_logic(void) {
+    SUITE("fifty-move rule — clock logic");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    
+    place(&b, 0, 4, KING);
+    place(&b, 7, 4, -KING);
+    place(&b, 0, 0, ROOK);
+    
+    /* Start at 99 half-moves */
+    b.halfmove_clock = 99;
+    b.turn = WHITE;
+    
+    /* 1. Quiet rook move increments to 100 */
+    Move m1 = { 0, 0, 0, 1, 0 };
+    apply_move(&b, &m1);
+    CHECK_EQ(b.halfmove_clock, 100);
+    
+    /* 2. Capture resets it to 0 */
+    b.turn = WHITE;
+    place(&b, 0, 1, ROOK);
+    place(&b, 7, 1, -ROOK); /* capture target */
+    Move m2 = { 0, 1, 7, 1, 0 };
+    apply_move(&b, &m2);
+    CHECK_EQ(b.halfmove_clock, 0);
+
+    /* 3. Setting to 100 and moving a pawn resets it to 0 */
+    b.halfmove_clock = 100;
+    b.turn = WHITE;
+    place(&b, 1, 4, PAWN);
+    Move m3 = { 1, 4, 2, 4, 0 };
+    apply_move(&b, &m3);
+    CHECK_EQ(b.halfmove_clock, 0);
+}
+
 static void test_apply_move_fullmove_counter(void) {
     SUITE("apply_move — fullmove counter increments after black's move");
     Board b;
@@ -1069,6 +1105,7 @@ static const TestFn tests[] = {
     test_pinned_piece_cannot_move,
     /* apply_move side effects */
     test_apply_move_halfmove_clock,
+    test_fifty_move_rule_logic,
     test_apply_move_fullmove_counter,
     test_apply_move_turn_flips,
     /* eval */
