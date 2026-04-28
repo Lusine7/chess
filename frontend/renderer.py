@@ -32,11 +32,14 @@ CLR_BTN_B       = ( 60,  60,  80)
 CLR_BTN_HOVER   = (255, 220, 100)
 CLR_OVERLAY     = (0,   0,   0, 160)
 
-# Unicode chess pieces (white pieces / black pieces)
-PIECES = {
-    'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
-    'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟',
-}
+# Piece letter labels (uppercase = white, lowercase = black)
+PIECE_LABEL = {'K':'K','Q':'Q','R':'R','B':'B','N':'N','P':'P',
+               'k':'K','q':'Q','r':'R','b':'B','n':'N','p':'P'}
+# Piece colours
+CLR_WHITE_PIECE  = (255, 252, 235)
+CLR_BLACK_PIECE  = ( 30,  25,  20)
+CLR_WHITE_RING   = (180, 140,  80)
+CLR_BLACK_RING   = (200, 200, 200)
 
 
 def _sq_rect(idx: int) -> pygame.Rect:
@@ -56,24 +59,9 @@ class Renderer:
         self.screen = screen
         pygame.font.init()
 
-        # Try to load a font that has chess glyphs; fall back gracefully
-        font_candidates = [
-            "segoeuisymbol", "symbola", "freesans", "dejavusans",
-            "notoemoji", "arial unicode ms",
-        ]
-        self.piece_font = None
-        for name in font_candidates:
-            try:
-                f = pygame.font.SysFont(name, 52, bold=False)
-                # Quick test: render a known glyph
-                surf = f.render("♔", True, (0, 0, 0))
-                if surf.get_width() > 5:
-                    self.piece_font = f
-                    break
-            except Exception:
-                pass
-        if self.piece_font is None:
-            self.piece_font = pygame.font.SysFont(None, 52)
+        # Use a reliable built-in bold font for piece letters
+        self.piece_font = pygame.font.SysFont("dejavusans", 28, bold=True) or \
+                          pygame.font.SysFont(None, 30, bold=True)
 
         self.label_font  = pygame.font.SysFont("segoeui", 14)
         self.status_font = pygame.font.SysFont("segoeui", 18)
@@ -191,19 +179,29 @@ class Renderer:
             self.screen.blit(rt, (BOARD_LEFT + 3, BOARD_TOP + i * SQ + 3))
 
     def _draw_pieces(self, board_str: str, flipped: bool) -> None:
+        radius = SQ // 2 - 4
         for idx in range(64):
             draw_idx = (63 - idx) if flipped else idx
             ch = board_str[idx]
             if ch == '.':
                 continue
-            glyph = PIECES.get(ch, ch)
-            color = (255, 255, 255) if ch.isupper() else (20, 20, 20)
-            # Shadow for readability
-            shadow = self.piece_font.render(glyph, True, (0, 0, 0))
-            rect   = _sq_rect(draw_idx)
+
+            is_white = ch.isupper()
+            rect = _sq_rect(draw_idx)
             cx, cy = rect.centerx, rect.centery
-            self.screen.blit(shadow, shadow.get_rect(center=(cx + 1, cy + 2)))
-            surf = self.piece_font.render(glyph, True, color)
+
+            # Outer ring (subtle border)
+            ring_col  = CLR_WHITE_RING if is_white else CLR_BLACK_RING
+            pygame.draw.circle(self.screen, ring_col, (cx, cy), radius + 2)
+
+            # Filled circle body
+            body_col = CLR_WHITE_PIECE if is_white else CLR_BLACK_PIECE
+            pygame.draw.circle(self.screen, body_col, (cx, cy), radius)
+
+            # Bold letter label
+            label    = PIECE_LABEL.get(ch, ch)
+            txt_col  = CLR_BLACK_PIECE if is_white else CLR_WHITE_PIECE
+            surf = self.piece_font.render(label, True, txt_col)
             self.screen.blit(surf, surf.get_rect(center=(cx, cy)))
 
     def _draw_status_bar(self, status: str) -> None:
