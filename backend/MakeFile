@@ -7,7 +7,7 @@ OBJS    = $(SRCS:.c=.o)
 PYTHON  = python3
 PIP     = pip3
 
-.PHONY: all clean setup run test
+.PHONY: all clean setup run test test_py test_all
 
 all: $(TARGET)
 
@@ -39,6 +39,13 @@ TEST_BIN  = test_chess
 
 test: $(TEST_BIN)
 	./$(TEST_BIN)
+
+# Run Python unit tests (no binary required — uses unittest.mock)
+test_py:
+	$(PYTHON) -m unittest ../frontend/test_protocol.py -v
+
+# Run both C and Python test suites
+test_all: test test_py
 
 $(TEST_BIN): $(TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
