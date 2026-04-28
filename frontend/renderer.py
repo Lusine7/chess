@@ -60,135 +60,16 @@ PROMO_BDR  = ( 80,  80,  80)
 STATUS_HEIGHT = 48
 PROMO_PIECES  = ['q', 'r', 'b', 'n']
 
-# Piece colours
-WHITE_FILL   = (248, 248, 240)
-WHITE_STROKE = ( 40,  40,  40)
-BLACK_FILL   = ( 35,  35,  35)
-BLACK_STROKE = (210, 210, 210)
-
-
-# ================================================================== #
-#  Piece drawing helpers  (all coordinates in 0-80 unit space)        #
-# ================================================================== #
-
-def _s(v, sq):
-    """Scale a 0-80 unit value to pixels."""
-    return int(v * sq / 80)
-
-def _sp(x, y, sq):
-    return (int(x * sq / 80), int(y * sq / 80))
-
-def _poly(surf, pts, sq, fill, stroke, lw):
-    scaled = [_sp(x, y, sq) for x, y in pts]
-    pygame.draw.polygon(surf, fill,   scaled)
-    pygame.draw.polygon(surf, stroke, scaled, lw)
-
-def _rect(surf, x, y, w, h, sq, fill, stroke, lw):
-    r = (_s(x, sq), _s(y, sq), _s(w, sq), _s(h, sq))
-    pygame.draw.rect(surf, fill,   r)
-    pygame.draw.rect(surf, stroke, r, lw)
-
-def _circle(surf, cx, cy, r, sq, fill, stroke, lw):
-    pygame.draw.circle(surf, fill,   _sp(cx, cy, sq), _s(r, sq))
-    pygame.draw.circle(surf, stroke, _sp(cx, cy, sq), _s(r, sq), lw)
-
-
-# ------------------------------------------------------------------ #
-
-def _draw_pawn(surf, sq, fill, stroke, lw):
-    _circle(surf, 40, 22, 11, sq, fill, stroke, lw)
-    _poly(surf, [(32,33),(48,33),(52,58),(28,58)], sq, fill, stroke, lw)
-    _poly(surf, [(22,58),(58,58),(62,72),(18,72)], sq, fill, stroke, lw)
-    _rect(surf, 16, 72, 48, 6, sq, fill, stroke, lw)
-
-def _draw_rook(surf, sq, fill, stroke, lw):
-    for bx in [18, 33, 48]:
-        _rect(surf, bx, 12, 10, 14, sq, fill, stroke, lw)
-    _rect(surf, 18, 22, 44, 4, sq, fill, stroke, lw)
-    _poly(surf, [(24,26),(56,26),(60,60),(20,60)], sq, fill, stroke, lw)
-    _poly(surf, [(16,60),(64,60),(68,74),(12,74)], sq, fill, stroke, lw)
-    _rect(surf, 10, 74, 60, 6, sq, fill, stroke, lw)
-
-def _draw_knight(surf, sq, fill, stroke, lw, is_white):
-    pts = [
-        (30,70),(50,70),(52,55),(58,40),
-        (56,25),(45,15),(35,15),(28,22),
-        (22,30),(24,42),(30,48),(28,55),
-    ]
-    _poly(surf, pts, sq, fill, stroke, lw)
-    _poly(surf, [(16,70),(64,70),(68,78),(12,78)], sq, fill, stroke, lw)
-    # eye
-    eye_fill = (255,255,255) if not is_white else (0,0,0)
-    pygame.draw.circle(surf, stroke,   _sp(47,20,sq), _s(4,sq))
-    pygame.draw.circle(surf, eye_fill, _sp(47,20,sq), _s(2,sq))
-    # nostril
-    pygame.draw.circle(surf, stroke, _sp(38,28,sq), _s(3,sq))
-
-def _draw_bishop(surf, sq, fill, stroke, lw):
-    pts = [(40,12),(52,20),(56,38),(54,56),(52,62),(28,62),(26,56),(24,38),(28,20)]
-    _poly(surf, pts, sq, fill, stroke, lw)
-    _circle(surf, 40, 12, 6, sq, fill, stroke, lw)
-    lw2 = max(1, lw)
-    pygame.draw.line(surf, stroke, _sp(40,32,sq), _sp(40,52,sq), lw2)
-    pygame.draw.line(surf, stroke, _sp(32,42,sq), _sp(48,42,sq), lw2)
-    _poly(surf, [(18,62),(62,62),(66,74),(14,74)], sq, fill, stroke, lw)
-    _rect(surf, 12, 74, 56, 6, sq, fill, stroke, lw)
-
-def _draw_queen(surf, sq, fill, stroke, lw):
-    # Five crown balls
-    for cx in [20, 30, 40, 50, 60]:
-        _circle(surf, cx, 14, 5, sq, fill, stroke, lw)
-    crown = [(20,14),(20,36),(60,36),(60,14),(55,20),(50,22),(45,16),(40,10),(35,16),(30,22),(25,20)]
-    _poly(surf, crown, sq, fill, stroke, lw)
-    _poly(surf, [(22,36),(58,36),(54,62),(26,62)], sq, fill, stroke, lw)
-    _poly(surf, [(16,62),(64,62),(68,74),(12,74)], sq, fill, stroke, lw)
-    _rect(surf, 10, 74, 60, 6, sq, fill, stroke, lw)
-
-def _draw_king(surf, sq, fill, stroke, lw):
-    # Cross
-    _rect(surf, 36,  8,  8, 22, sq, fill, stroke, lw)
-    _rect(surf, 28, 14, 24,  8, sq, fill, stroke, lw)
-    _poly(surf, [(22,30),(58,30),(54,62),(26,62)], sq, fill, stroke, lw)
-    _poly(surf, [(16,62),(64,62),(68,74),(12,74)], sq, fill, stroke, lw)
-    _rect(surf, 10, 74, 60,  6, sq, fill, stroke, lw)
-
-
-_DRAW_FN = {
-    'P': _draw_pawn,
-    'R': _draw_rook,
-    'B': _draw_bishop,
-    'Q': _draw_queen,
-    'K': _draw_king,
-}
-
-
 def _make_piece_surface(piece_char: str, sq: int) -> pygame.Surface:
-    # ── PNG image path ──────────────────────────────────────────────
-    if piece_char in _PIECE_IMAGES:
-        margin = max(3, sq // 14)          # small breathing room
-        inner  = sq - 2 * margin
-        scaled = pygame.transform.smoothscale(
-            _PIECE_IMAGES[piece_char], (inner, inner)
-        )
-        surf = pygame.Surface((sq, sq), pygame.SRCALPHA)
-        surf.fill((0, 0, 0, 0))
-        surf.blit(scaled, (margin, margin))
-        return surf
-
-    # ── Primitive fallback ──────────────────────────────────────────
-    surf = pygame.Surface((sq, sq), pygame.SRCALPHA)
+    """Return a surface with the piece image scaled to sq x sq pixels."""
+    img    = _PIECE_IMAGES.get(piece_char)
+    margin = max(3, sq // 14)
+    inner  = sq - 2 * margin
+    surf   = pygame.Surface((sq, sq), pygame.SRCALPHA)
     surf.fill((0, 0, 0, 0))
-    is_white = piece_char.isupper()
-    ptype    = piece_char.upper()
-    fill     = WHITE_FILL   if is_white else BLACK_FILL
-    stroke   = WHITE_STROKE if is_white else BLACK_STROKE
-    lw       = max(2, sq // 22)
-
-    if ptype == 'N':
-        _draw_knight(surf, sq, fill, stroke, lw, is_white)
-    elif ptype in _DRAW_FN:
-        _DRAW_FN[ptype](surf, sq, fill, stroke, lw)
-
+    if img:
+        scaled = pygame.transform.smoothscale(img, (inner, inner))
+        surf.blit(scaled, (margin, margin))
     return surf
 
 
