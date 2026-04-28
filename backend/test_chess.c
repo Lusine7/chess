@@ -239,7 +239,8 @@ static void test_bishop_attacks(void) {
     CHECK(!is_attacked(&b, 0, 3, WHITE));  /* same rank, not diagonal */
 
     /* Blocker cuts off the diagonal */
-    place(&b, 2, 4, PAWN);                 /* blocker on e3 */
+    /* Use ROOK (not PAWN) so the blocker itself doesn't attack (3,5) */
+    place(&b, 2, 4, ROOK);                 /* blocker on e3 */
     CHECK(is_attacked(&b, 2, 4, WHITE));   /* can still see the blocker */
     CHECK(!is_attacked(&b, 3, 5, WHITE));  /* blocked beyond it */
 }
@@ -414,7 +415,7 @@ static void test_promotion_generates_four_moves(void) {
 
     place(&b, 6, 4, PAWN);    /* white pawn on e7, one push from promotion */
     place(&b, 0, 4, KING);
-    place(&b, 7, 4, -KING);
+    place(&b, 7, 0, -KING);  /* a8 — keep e8 clear so the pawn can promote */
 
     int n = legal_moves_from(&b, 6, 4);
     CHECK_EQ(n, 4);  /* Q, R, B, N */
@@ -861,9 +862,14 @@ static void test_ai_finds_checkmate_in_one(void) {
     Move best;
     int ok = find_best_move(&b, &best);
     CHECK_EQ(ok, 1);
-    /* The mating move is Qh7 (rank 6, file 7) */
-    CHECK(best.from_rank == 5 && best.from_file == 6 &&
-          best.to_rank   == 6 && best.to_file   == 7);
+    /* Verify the chosen move delivers checkmate (don't hardcode which of
+     * the possible mating moves the engine selects). */
+    Board after_mate;
+    copy_board(&after_mate, &b);
+    apply_move(&after_mate, &best);
+    Move black_replies[MAX_MOVES];
+    int nm = generate_legal_moves(&after_mate, black_replies);
+    CHECK(nm == 0 && is_in_check(&after_mate, BLACK));
 }
 
 static void test_ai_move_does_not_leave_king_in_check(void) {
