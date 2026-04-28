@@ -1,0 +1,25 @@
+CC      = gcc
+CFLAGS  = -Wall -Wextra -O2 -std=c11
+TARGET  = chess
+SRCS    = main.c board.c moves.c eval.c ai.c
+OBJS    = $(SRCS:.c=.o)
+
+.PHONY: all clean
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Header dependencies
+main.o:  main.c  board.h moves.h ai.h
+board.o: board.c board.h
+moves.o: moves.c moves.h board.h
+eval.o:  eval.c  eval.h  board.h
+ai.o:    ai.c    ai.h    board.h moves.h eval.h
+
+clean:
+	rm -f $(OBJS) $(TARGET)

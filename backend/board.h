@@ -1,57 +1,55 @@
 #ifndef BOARD_H
 #define BOARD_H
 
-/* Piece codes: positive = white, negative = black, 0 = empty */
-#define EMPTY   0
-#define PAWN    1
-#define KNIGHT  2
-#define BISHOP  3
-#define ROOK    4
-#define QUEEN   5
-#define KING    6
+#include <string.h>
 
-/* Castling rights bitmask */
-#define CASTLE_WK 1
-#define CASTLE_WQ 2
-#define CASTLE_BK 4
-#define CASTLE_BQ 8
+/* Piece types */
+#define EMPTY  0
+#define PAWN   1
+#define KNIGHT 2
+#define BISHOP 3
+#define ROOK   4
+#define QUEEN  5
+#define KING   6
 
-/* Move flags */
-#define FLAG_EN_PASSANT 1
-#define FLAG_CASTLING   2
-#define FLAG_PROMOTION  4
+/* Colors — white pieces are positive, black are negative */
+#define WHITE  1
+#define BLACK -1
 
+/*
+ * Board layout: board[rank][file]
+ *   rank 0 = rank 1 (white's back rank)
+ *   rank 7 = rank 8 (black's back rank)
+ *   file 0 = 'a', file 7 = 'h'
+ *
+ * Piece encoding: positive = white, negative = black
+ * e.g. WHITE QUEEN = 5, BLACK QUEEN = -5
+ */
 typedef struct {
-    int squares[64]; /* index 0=a8, index 63=h1 */
-    int turn;        /* 1=white, -1=black */
-    int castling;    /* bitmask */
-    int en_passant;  /* -1 or target square index */
+    int squares[8][8];
+
+    int turn;           /* WHITE or BLACK */
+
+    /* Castling rights */
+    int white_castle_k; /* kingside  */
+    int white_castle_q; /* queenside */
+    int black_castle_k;
+    int black_castle_q;
+
+    /* En-passant target square (-1 if none) */
+    int ep_rank;
+    int ep_file;
+
     int halfmove_clock;
-    int fullmove;
+    int fullmove_number;
 } Board;
 
-typedef struct {
-    int from, to;
-    int promotion; /* 0 or piece code */
-    int flags;
-} Move;
-
-typedef struct {
-    int captured;
-    int captured_sq; /* for en passant */
-    int castling;
-    int en_passant;
-    int halfmove_clock;
-} UndoInfo;
-
 void board_init(Board *b);
-void board_apply_move(Board *b, Move m, UndoInfo *u);
-void board_undo_move(Board *b, Move m, UndoInfo *u);
-void board_print(Board *b);
+void copy_board(Board *dst, const Board *src);
+int  board_color(int piece);           /* WHITE / BLACK / 0 */
+int  board_type(int piece);            /* PAWN … KING       */
+void sq_to_str(int rank, int file, char *out);  /* -> "e4\0" */
+int  str_to_rank(const char *sq);      /* "e4" -> 3 */
+int  str_to_file(const char *sq);      /* "e4" -> 4 */
 
-int  square_from_alg(const char *alg);
-void alg_from_square(int sq, char *out);
-char piece_to_char(int piece);
-int  char_to_piece(char c);
-
-#endif
+#endif /* BOARD_H */

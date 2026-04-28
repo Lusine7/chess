@@ -1,291 +1,356 @@
 #include "moves.h"
 #include <stdlib.h>
 
-static inline int on_board(int sq) { return sq >= 0 && sq < 64; }
-
 /* ------------------------------------------------------------------ */
-/*  Attack detection                                                   */
+/*  Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-int is_square_attacked(Board *b, int sq, int by_color) {
-    /* --- Pawn attacks --- */
-    if (by_color == 1) {
-        /* White pawns attack diagonally upward (decreasing index).
-           A white pawn at sq+7 attacks sq (if no file-wrap).
-           A white pawn at sq+9 attacks sq (if no file-wrap).        */
-        if (sq % 8 != 0 && sq + 7 < 64 && b->squares[sq + 7] ==  PAWN) return 1;
-        if (sq % 8 != 7 && sq + 9 < 64 && b->squares[sq + 9] ==  PAWN) return 1;
-    } else {
-        /* Black pawns attack diagonally downward (increasing index). */
-        if (sq % 8 != 7 && sq - 7 >= 0 && b->squares[sq - 7] == -PAWN) return 1;
-        if (sq % 8 != 0 && sq - 9 >= 0 && b->squares[sq - 9] == -PAWN) return 1;
+static int in_bounds(int rank, int file) {
+    return rank >= 0 && rank < 8 && file >= 0 && file < 8;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Attack detection                                                    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Returns 1 if (rank, file) is attacked by any piece of `by_color`.
+ * Used both for check detection and castling legality.
+ */
+int is_attacked(const Board *b, int rank, int file, int by_color) {
+
+    /* --- Pawn attacks ---
+     * White pawns move up (+rank), so a white pawn at (r,f) attacks (r+1, f±1).
+     * Therefore (rank,file) is attacked by a white pawn sitting at (rank-1, file±1).
+     * For black it's the mirror: look at (rank+1, file±1).
+     */
+    int pawn_src_rank = (by_color == WHITE) ? rank - 1 : rank + 1;
+    for (int df = -1; df <= 1; df += 2) {
+        int pf = file + df;
+        if (in_bounds(pawn_src_rank, pf) &&
+            b->squares[pawn_src_rank][pf] == by_color * PAWN)
+            return 1;
     }
 
     /* --- Knight attacks --- */
-    static const int kdx[8] = {-2,-2,-1,-1, 1, 1, 2, 2};
-    static const int kdy[8] = {-1, 1,-2, 2,-2, 2,-1, 1};
-    int f = sq % 8, r = sq / 8;
+    static const int kn[8][2] = {
+        {-2,-1},{-2,1},{-1,-2},{-1,2},{1,-2},{1,2},{2,-1},{2,1}
+    };
     for (int i = 0; i < 8; i++) {
-        int nf = f + kdx[i], nr = r + kdy[i];
-        if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
-        if (b->squares[nr * 8 + nf] == by_color * KNIGHT) return 1;
+        int nr = rank + kn[i][0], nf = file + kn[i][1];
+        if (in_bounds(nr, nf) && b->squares[nr][nf] == by_color * KNIGHT)
+            return 1;
     }
 
-    /* --- Sliding pieces --- */
-    /* Rook / Queen straight rays */
-    static const int straight[4] = {-8, 8, -1, 1};
-    for (int d = 0; d < 4; d++) {
-        int dir = straight[d];
-        int cur = sq;
-        while (1) {
-            int nxt = cur + dir;
-            if (!on_board(nxt)) break;
-            if (abs(nxt % 8 - cur % 8) > 1) break; /* file wrap */
-            int p = b->squares[nxt];
-            if (p != EMPTY) {
-                if (p == by_color * ROOK || p == by_color * QUEEN) return 1;
-                break;
-            }
-            cur = nxt;
-        }
-    }
-    /* Bishop / Queen diagonal rays */
-    static const int diag[4] = {-9, -7, 7, 9};
-    for (int d = 0; d < 4; d++) {
-        int dir = diag[d];
-        int cur = sq;
-        while (1) {
-            int nxt = cur + dir;
-            if (!on_board(nxt)) break;
-            if (abs(nxt % 8 - cur % 8) != 1) break; /* file wrap */
-            int p = b->squares[nxt];
+    /* --- Diagonal sliders (bishop / queen) --- */
+    static const int diag[4][2] = {{1,1},{1,-1},{-1,1},{-1,-1}};
+    for (int i = 0; i < 4; i++) {
+        int r = rank + diag[i][0], f = file + diag[i][1];
+        while (in_bounds(r, f)) {
+            int p = b->squares[r][f];
             if (p != EMPTY) {
                 if (p == by_color * BISHOP || p == by_color * QUEEN) return 1;
                 break;
             }
-            cur = nxt;
+            r += diag[i][0]; f += diag[i][1];
+        }
+    }
+
+    /* --- Straight sliders (rook / queen) --- */
+    static const int straight[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    for (int i = 0; i < 4; i++) {
+        int r = rank + straight[i][0], f = file + straight[i][1];
+        while (in_bounds(r, f)) {
+            int p = b->squares[r][f];
+            if (p != EMPTY) {
+                if (p == by_color * ROOK || p == by_color * QUEEN) return 1;
+                break;
+            }
+            r += straight[i][0]; f += straight[i][1];
         }
     }
 
     /* --- King attacks --- */
-    static const int kdirs[8] = {-9,-8,-7,-1,1,7,8,9};
-    for (int i = 0; i < 8; i++) {
-        int nxt = sq + kdirs[i];
-        if (!on_board(nxt)) continue;
-        if (abs(nxt % 8 - sq % 8) > 1) continue;
-        if (b->squares[nxt] == by_color * KING) return 1;
+    for (int dr = -1; dr <= 1; dr++) {
+        for (int df = -1; df <= 1; df++) {
+            if (dr == 0 && df == 0) continue;
+            int nr = rank + dr, nf = file + df;
+            if (in_bounds(nr, nf) && b->squares[nr][nf] == by_color * KING)
+                return 1;
+        }
     }
 
     return 0;
 }
 
-int is_in_check(Board *b, int color) {
-    /* Find king */
-    for (int i = 0; i < 64; i++) {
-        if (b->squares[i] == color * KING) {
-            return is_square_attacked(b, i, -color);
-        }
-    }
-    return 0; /* should never happen */
+/* Returns 1 if `color`'s king is currently in check. */
+int is_in_check(const Board *b, int color) {
+    for (int r = 0; r < 8; r++)
+        for (int f = 0; f < 8; f++)
+            if (b->squares[r][f] == color * KING)
+                return is_attacked(b, r, f, -color);
+    return 0; /* shouldn't happen */
 }
 
 /* ------------------------------------------------------------------ */
-/*  Move generation helpers                                            */
+/*  Pseudo-move generation helpers                                      */
 /* ------------------------------------------------------------------ */
 
-static int add_move(Move *out, int n, int from, int to, int flags, int promo) {
-    out[n].from      = from;
-    out[n].to        = to;
-    out[n].flags     = flags;
-    out[n].promotion = promo;
-    return n + 1;
+static void add_move(Move *moves, int *cnt,
+                     int fr, int ff, int tr, int tf, int promo) {
+    moves[*cnt].from_rank  = fr;
+    moves[*cnt].from_file  = ff;
+    moves[*cnt].to_rank    = tr;
+    moves[*cnt].to_file    = tf;
+    moves[*cnt].promotion  = promo;
+    (*cnt)++;
 }
 
-static int gen_pawn(Board *b, int sq, Move *out, int n) {
-    int color = b->squares[sq] > 0 ? 1 : -1;
-    int dir   = color == 1 ? -8 : 8;
-
-    /* Promotion rank range */
-    int promo_row = color == 1 ? 0 : 7; /* destination row (sq/8) triggers promo */
-
-    /* Single push */
-    int to = sq + dir;
-    if (on_board(to) && b->squares[to] == EMPTY) {
-        if (to / 8 == promo_row) {
-            n = add_move(out, n, sq, to, FLAG_PROMOTION, QUEEN);
-            n = add_move(out, n, sq, to, FLAG_PROMOTION, ROOK);
-            n = add_move(out, n, sq, to, FLAG_PROMOTION, BISHOP);
-            n = add_move(out, n, sq, to, FLAG_PROMOTION, KNIGHT);
-        } else {
-            n = add_move(out, n, sq, to, 0, 0);
-        }
-        /* Double push from starting rank */
-        int start_min = color == 1 ? 48 : 8;
-        int start_max = color == 1 ? 55 : 15;
-        if (sq >= start_min && sq <= start_max) {
-            int to2 = sq + 2 * dir;
-            if (on_board(to2) && b->squares[to2] == EMPTY)
-                n = add_move(out, n, sq, to2, 0, 0);
-        }
+/*
+ * Add a pawn move, expanding to four promotion moves when the pawn
+ * reaches the back rank.
+ */
+static void add_pawn_move(Move *moves, int *cnt,
+                          int fr, int ff, int tr, int tf, int color) {
+    int promo_rank = (color == WHITE) ? 7 : 0;
+    if (tr == promo_rank) {
+        add_move(moves, cnt, fr, ff, tr, tf, QUEEN);
+        add_move(moves, cnt, fr, ff, tr, tf, ROOK);
+        add_move(moves, cnt, fr, ff, tr, tf, BISHOP);
+        add_move(moves, cnt, fr, ff, tr, tf, KNIGHT);
+    } else {
+        add_move(moves, cnt, fr, ff, tr, tf, 0);
     }
-
-    /* Captures (left and right) */
-    int cap_offsets[2] = {dir - 1, dir + 1};
-    int file_check[2]  = {sq % 8 > 0, sq % 8 < 7}; /* left/right valid? */
-
-    for (int i = 0; i < 2; i++) {
-        if (!file_check[i]) continue;
-        int cto = sq + cap_offsets[i];
-        if (!on_board(cto)) continue;
-
-        int target = b->squares[cto];
-        int is_enemy = (target != EMPTY) && ((target > 0) != (color > 0));
-        int is_ep    = (cto == b->en_passant);
-
-        if (is_enemy) {
-            if (cto / 8 == promo_row) {
-                n = add_move(out, n, sq, cto, FLAG_PROMOTION, QUEEN);
-                n = add_move(out, n, sq, cto, FLAG_PROMOTION, ROOK);
-                n = add_move(out, n, sq, cto, FLAG_PROMOTION, BISHOP);
-                n = add_move(out, n, sq, cto, FLAG_PROMOTION, KNIGHT);
-            } else {
-                n = add_move(out, n, sq, cto, 0, 0);
-            }
-        } else if (is_ep) {
-            n = add_move(out, n, sq, cto, FLAG_EN_PASSANT, 0);
-        }
-    }
-    return n;
 }
 
-static int gen_knight(Board *b, int sq, Move *out, int n) {
-    static const int dx[8] = {-2,-2,-1,-1, 1, 1, 2, 2};
-    static const int dy[8] = {-1, 1,-2, 2,-2, 2,-1, 1};
-    int color = b->squares[sq] > 0 ? 1 : -1;
-    int f = sq % 8, r = sq / 8;
-    for (int i = 0; i < 8; i++) {
-        int nf = f + dx[i], nr = r + dy[i];
-        if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
-        int to = nr * 8 + nf;
-        int t = b->squares[to];
-        if (t == EMPTY || (t > 0) != (color > 0))
-            n = add_move(out, n, sq, to, 0, 0);
-    }
-    return n;
-}
+/* ------------------------------------------------------------------ */
+/*  Pseudo-move generation                                              */
+/* ------------------------------------------------------------------ */
 
-static int gen_sliding(Board *b, int sq, const int *dirs, int ndirs, Move *out, int n) {
-    int color = b->squares[sq] > 0 ? 1 : -1;
-    for (int d = 0; d < ndirs; d++) {
-        int dir = dirs[d];
-        int cur = sq;
-        while (1) {
-            int nxt = cur + dir;
-            if (!on_board(nxt)) break;
-            if (abs(nxt % 8 - cur % 8) > 1) break; /* wrap guard */
-            int t = b->squares[nxt];
-            if (t == EMPTY) {
-                n = add_move(out, n, sq, nxt, 0, 0);
-            } else {
-                if ((t > 0) != (color > 0))
-                    n = add_move(out, n, sq, nxt, 0, 0);
+int generate_pseudo_moves(const Board *b, Move *moves) {
+    int count = 0;
+    int color = b->turn;
+    int opp   = -color;
+
+    /* Sliding piece directions: [0..3] diagonal, [4..7] straight */
+    static const int dirs[8][2] = {
+        {1,1},{1,-1},{-1,1},{-1,-1},
+        {1,0},{-1,0},{0,1},{0,-1}
+    };
+
+    for (int r = 0; r < 8; r++) {
+        for (int f = 0; f < 8; f++) {
+            int piece = b->squares[r][f];
+            if (board_color(piece) != color) continue;
+            int type  = board_type(piece);
+
+            switch (type) {
+
+            /* ---- Pawn ---- */
+            case PAWN: {
+                int dir        = color;            /* WHITE=+1, BLACK=-1 */
+                int start_rank = (color == WHITE) ? 1 : 6;
+                int nr         = r + dir;
+
+                /* Single push */
+                if (in_bounds(nr, f) && b->squares[nr][f] == EMPTY) {
+                    add_pawn_move(moves, &count, r, f, nr, f, color);
+
+                    /* Double push from starting rank */
+                    int nr2 = r + 2 * dir;
+                    if (r == start_rank && b->squares[nr2][f] == EMPTY)
+                        add_move(moves, &count, r, f, nr2, f, 0);
+                }
+
+                /* Diagonal captures (normal + en-passant) */
+                for (int df = -1; df <= 1; df += 2) {
+                    int nf = f + df;
+                    if (!in_bounds(nr, nf)) continue;
+                    if (board_color(b->squares[nr][nf]) == opp)
+                        add_pawn_move(moves, &count, r, f, nr, nf, color);
+                    else if (b->ep_rank == nr && b->ep_file == nf)
+                        add_move(moves, &count, r, f, nr, nf, 0);
+                }
                 break;
             }
-            cur = nxt;
+
+            /* ---- Knight ---- */
+            case KNIGHT: {
+                static const int kn[8][2] = {
+                    {-2,-1},{-2,1},{-1,-2},{-1,2},{1,-2},{1,2},{2,-1},{2,1}
+                };
+                for (int i = 0; i < 8; i++) {
+                    int nr = r + kn[i][0], nf = f + kn[i][1];
+                    if (in_bounds(nr, nf) && board_color(b->squares[nr][nf]) != color)
+                        add_move(moves, &count, r, f, nr, nf, 0);
+                }
+                break;
+            }
+
+            /* ---- Bishop / Rook / Queen (sliders) ---- */
+            case BISHOP:
+            case ROOK:
+            case QUEEN: {
+                int d_start = (type == ROOK)   ? 4 : 0;
+                int d_end   = (type == BISHOP)  ? 4 : 8;
+                for (int d = d_start; d < d_end; d++) {
+                    int nr = r + dirs[d][0], nf = f + dirs[d][1];
+                    while (in_bounds(nr, nf)) {
+                        int target = b->squares[nr][nf];
+                        if (target == EMPTY) {
+                            add_move(moves, &count, r, f, nr, nf, 0);
+                        } else {
+                            if (board_color(target) == opp)
+                                add_move(moves, &count, r, f, nr, nf, 0);
+                            break; /* blocked */
+                        }
+                        nr += dirs[d][0]; nf += dirs[d][1];
+                    }
+                }
+                break;
+            }
+
+            /* ---- King ---- */
+            case KING: {
+                /* Normal one-square moves */
+                for (int dr = -1; dr <= 1; dr++) {
+                    for (int df = -1; df <= 1; df++) {
+                        if (dr == 0 && df == 0) continue;
+                        int nr = r + dr, nf = f + df;
+                        if (in_bounds(nr, nf) &&
+                            board_color(b->squares[nr][nf]) != color)
+                            add_move(moves, &count, r, f, nr, nf, 0);
+                    }
+                }
+
+                /* Castling — only if king is on its home square and not in check */
+                int back = (color == WHITE) ? 0 : 7;
+                if (r == back && f == 4 && !is_in_check(b, color)) {
+
+                    /* Kingside */
+                    int ck = (color == WHITE) ? b->white_castle_k : b->black_castle_k;
+                    if (ck &&
+                        b->squares[back][5] == EMPTY &&
+                        b->squares[back][6] == EMPTY &&
+                        !is_attacked(b, back, 5, opp) &&
+                        !is_attacked(b, back, 6, opp))
+                        add_move(moves, &count, r, f, back, 6, 0);
+
+                    /* Queenside */
+                    int cq = (color == WHITE) ? b->white_castle_q : b->black_castle_q;
+                    if (cq &&
+                        b->squares[back][3] == EMPTY &&
+                        b->squares[back][2] == EMPTY &&
+                        b->squares[back][1] == EMPTY &&
+                        !is_attacked(b, back, 3, opp) &&
+                        !is_attacked(b, back, 2, opp))
+                        add_move(moves, &count, r, f, back, 2, 0);
+                }
+                break;
+            }
+
+            } /* switch */
         }
     }
-    return n;
-}
 
-static int gen_king(Board *b, int sq, Move *out, int n) {
-    int color = b->squares[sq] > 0 ? 1 : -1;
-    static const int dirs[8] = {-9,-8,-7,-1,1,7,8,9};
-    for (int i = 0; i < 8; i++) {
-        int to = sq + dirs[i];
-        if (!on_board(to)) continue;
-        if (abs(to % 8 - sq % 8) > 1) continue;
-        int t = b->squares[to];
-        if (t == EMPTY || (t > 0) != (color > 0))
-            n = add_move(out, n, sq, to, 0, 0);
-    }
-
-    /* Castling */
-    int enemy = -color;
-    if (color == 1) { /* White */
-        if ((b->castling & CASTLE_WK) &&
-            b->squares[61] == EMPTY && b->squares[62] == EMPTY &&
-            !is_square_attacked(b, 60, enemy) &&
-            !is_square_attacked(b, 61, enemy) &&
-            !is_square_attacked(b, 62, enemy))
-            n = add_move(out, n, 60, 62, FLAG_CASTLING, 0);
-
-        if ((b->castling & CASTLE_WQ) &&
-            b->squares[59] == EMPTY && b->squares[58] == EMPTY && b->squares[57] == EMPTY &&
-            !is_square_attacked(b, 60, enemy) &&
-            !is_square_attacked(b, 59, enemy) &&
-            !is_square_attacked(b, 58, enemy))
-            n = add_move(out, n, 60, 58, FLAG_CASTLING, 0);
-    } else { /* Black */
-        if ((b->castling & CASTLE_BK) &&
-            b->squares[5] == EMPTY && b->squares[6] == EMPTY &&
-            !is_square_attacked(b, 4, enemy) &&
-            !is_square_attacked(b, 5, enemy) &&
-            !is_square_attacked(b, 6, enemy))
-            n = add_move(out, n, 4, 6, FLAG_CASTLING, 0);
-
-        if ((b->castling & CASTLE_BQ) &&
-            b->squares[3] == EMPTY && b->squares[2] == EMPTY && b->squares[1] == EMPTY &&
-            !is_square_attacked(b, 4, enemy) &&
-            !is_square_attacked(b, 3, enemy) &&
-            !is_square_attacked(b, 2, enemy))
-            n = add_move(out, n, 4, 2, FLAG_CASTLING, 0);
-    }
-    return n;
+    return count;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public: generate all pseudo-legal moves for current side          */
+/*  Apply a move                                                        */
 /* ------------------------------------------------------------------ */
 
-int generate_moves(Board *b, Move *out) {
-    static const int straight[4] = {-8, 8, -1,  1};
-    static const int diagonal[4] = {-9,-7,  7,  9};
-    static const int alldir [8]  = {-9,-8, -7, -1, 1, 7, 8, 9};
+void apply_move(Board *b, const Move *m) {
+    int fr = m->from_rank, ff = m->from_file;
+    int tr = m->to_rank,   tf = m->to_file;
 
-    int n = 0;
-    for (int sq = 0; sq < 64; sq++) {
-        int p = b->squares[sq];
-        if (p == EMPTY) continue;
-        int color = p > 0 ? 1 : -1;
-        if (color != b->turn) continue;
+    int piece    = b->squares[fr][ff];
+    int type     = board_type(piece);
+    int color    = board_color(piece);
+    int captured = b->squares[tr][tf]; /* save before overwriting */
 
-        int ap = p < 0 ? -p : p;
-        switch (ap) {
-            case PAWN:   n = gen_pawn   (b, sq, out, n); break;
-            case KNIGHT: n = gen_knight (b, sq, out, n); break;
-            case BISHOP: n = gen_sliding(b, sq, diagonal, 4, out, n); break;
-            case ROOK:   n = gen_sliding(b, sq, straight, 4, out, n); break;
-            case QUEEN:  n = gen_sliding(b, sq, alldir,   8, out, n); break;
-            case KING:   n = gen_king   (b, sq, out, n); break;
+    /* Snapshot en-passant target then clear it */
+    int prev_ep_rank = b->ep_rank;
+    int prev_ep_file = b->ep_file;
+    b->ep_rank = -1;
+    b->ep_file = -1;
+
+    /* En-passant capture — remove the captured pawn laterally */
+    if (type == PAWN && tf == prev_ep_file && tr == prev_ep_rank)
+        b->squares[fr][tf] = EMPTY;
+
+    /* Double pawn push — set new en-passant target */
+    if (type == PAWN && abs(tr - fr) == 2) {
+        b->ep_rank = (fr + tr) / 2;
+        b->ep_file = ff;
+    }
+
+    /* Castling — move the rook and revoke rights */
+    if (type == KING) {
+        int back = (color == WHITE) ? 0 : 7;
+        if (ff == 4 && tf == 6) { /* kingside  */
+            b->squares[back][5] = b->squares[back][7];
+            b->squares[back][7] = EMPTY;
+        } else if (ff == 4 && tf == 2) { /* queenside */
+            b->squares[back][3] = b->squares[back][0];
+            b->squares[back][0] = EMPTY;
+        }
+        if (color == WHITE) { b->white_castle_k = 0; b->white_castle_q = 0; }
+        else                { b->black_castle_k = 0; b->black_castle_q = 0; }
+    }
+
+    /* Rook move — revoke that side's castling right */
+    if (type == ROOK) {
+        if (color == WHITE) {
+            if (ff == 0) b->white_castle_q = 0;
+            if (ff == 7) b->white_castle_k = 0;
+        } else {
+            if (ff == 0) b->black_castle_q = 0;
+            if (ff == 7) b->black_castle_k = 0;
         }
     }
-    return n;
+
+    /* If a rook is captured on its home square, revoke castling right */
+    if (tr == 0 && tf == 0) b->white_castle_q = 0;
+    if (tr == 0 && tf == 7) b->white_castle_k = 0;
+    if (tr == 7 && tf == 0) b->black_castle_q = 0;
+    if (tr == 7 && tf == 7) b->black_castle_k = 0;
+
+    /* Move the piece */
+    b->squares[tr][tf] = piece;
+    b->squares[fr][ff] = EMPTY;
+
+    /* Promotion */
+    if (m->promotion != 0)
+        b->squares[tr][tf] = color * m->promotion;
+
+    /* Halfmove clock */
+    if (type == PAWN || captured != EMPTY)
+        b->halfmove_clock = 0;
+    else
+        b->halfmove_clock++;
+
+    if (color == BLACK) b->fullmove_number++;
+
+    b->turn = -color;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public: filter to legal moves only (king not in check after move) */
+/*  Legal move generation (filters pseudo-moves that leave king in check) */
 /* ------------------------------------------------------------------ */
 
-int generate_legal_moves(Board *b, Move *out) {
-    Move pseudo[256];
-    int  count = generate_moves(b, pseudo);
-    int  legal = 0;
-    for (int i = 0; i < count; i++) {
-        UndoInfo u;
-        board_apply_move(b, pseudo[i], &u);
-        if (!is_in_check(b, -b->turn)) /* turn already flipped */
-            out[legal++] = pseudo[i];
-        board_undo_move(b, pseudo[i], &u);
+int generate_legal_moves(Board *b, Move *moves) {
+    Move pseudo[MAX_MOVES];
+    int  n     = generate_pseudo_moves(b, pseudo);
+    int  count = 0;
+
+    for (int i = 0; i < n; i++) {
+        Board tmp;
+        copy_board(&tmp, b);
+        apply_move(&tmp, &pseudo[i]);
+        if (!is_in_check(&tmp, b->turn))   /* king must not be in check after move */
+            moves[count++] = pseudo[i];
     }
-    return legal;
+
+    return count;
 }

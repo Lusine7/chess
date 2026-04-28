@@ -1,156 +1,104 @@
 """
-protocol.py – thin wrapper around the C chess subprocess.
+protocol.py — thin wrapper around the C chess engine subprocess.
 
-All communication is line-delimited text over stdin/stdout pipes.
-
-Commands sent to C:
-    INIT
-    MOVE e2e4
-    AI_MOVE
-    LEGAL e2
-    QUIT
-
-Responses received from C:
-    BOARD <64-char string>
-    AI_MOVE <from><to>[promo]
-    LEGAL_MOVES [sq ...]
-    GAME_OVER WHITE_WIN | BLACK_WIN | DRAW
-    ERROR <msg>
+All communication is line-based ASCII over stdin / stdout.
+Every method blocks until the engine responds (one line).
 """
 
 import subprocess
 import os
-import sys
 
 
-class ChessBackend:
-    def __init__(self, exe_path: str):
-        if not os.path.isfile(exe_path):
-            raise FileNotFoundError(f"Chess engine not found: {exe_path}")
-        self._proc = subprocess.Popen(
-            [exe_path],
+class ChessProtocol:
+    def __init__(self, binary_path: str):
+        if not os.path.exists(binary_path):
+            raise FileNotFoundError(
+                f"Chess binary not found at '{binary_path}'.\n"
+                "Run:  cd backend && make"
+            )
+        self.proc = subprocess.Popen(
+            [binary_path],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
             bufsize=1,          # line-buffered
         )
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ #
+    #  Low-level I/O                                                       #
+    # ------------------------------------------------------------------ #
 
-    def _send(self, cmd: str) -> None:
-        self._proc.stdin.write(cmd + "\n")
-        self._proc.stdin.flush()
+    def _send(self, command: str) -> str:
+        """Send a command line and return the engine's single-line reply."""
+        self.proc.stdin.write(command + "\n")
+        self.proc.stdin.flush()
+        reply = self.proc.stdout.readline()
+        return reply.strip()
 
-    def _read_line(self) -> str:
-        line = self._proc.stdout.readline()
-        if not line:
-            raise IOError("Chess engine closed unexpectedly")
-        return line.rstrip("\r\n")
+    # ------------------------------------------------------------------ #
+    #  High-level API                                                      #
+    # ------------------------------------------------------------------ #
 
-    def _read_response(self) -> dict:
+    def init(self) -> bool:
+        """Reset the board to the starting position."""
+        return self._send("INIT") == "OK"
+
+    def get_moves(self, square: str) -> list[str]:
         """
-        Read lines until we have at least one meaningful response.
-        Returns a dict with any keys present: board, ai_move, legal_moves,
-        game_over, error.
+        Return a list of legal destination squares for the piece on `square`.
+        e.g. get_moves("e2") -> ["e3", "e4"]
         """
-        result = {}
-        while True:
-            line = self._read_line()
-            if line.startswith("BOARD "):
-                result["board"] = line[6:]          # 64-char string
-                # After BOARD, there may be a GAME_OVER on the next line
-                # (but we can't block forever – peek heuristically)
-                # The C engine always sends GAME_OVER right after BOARD if applicable.
-                # We'll read one more optional line without blocking by checking.
-                break
-            elif line.startswith("AI_MOVE "):
-                result["ai_move"] = line[8:]        # e.g. "e7e5" or "e7e8Q"
-                # Next line will be the BOARD
-                continue
-            elif line.startswith("LEGAL_MOVES"):
-                parts = line.split()
-                result["legal_moves"] = parts[1:]   # list of squares, possibly empty
-                break
-            elif line.startswith("GAME_OVER "):
-                result["game_over"] = line[10:]
-                break
-            elif line.startswith("ERROR "):
-                result["error"] = line[6:]
-                break
-            # ignore unknown lines
+        reply = self._send(f"MOVES {square}")
+        if reply.startswith("MOVES"):
+            parts = reply.split()
+            return parts[1:]        # may be empty if no legal moves
+        return []
 
-        # After a BOARD line, try to read a potential GAME_OVER line.
-        # We peek at what the engine may have queued.
-        if "board" in result and "game_over" not in result:
-            import select, platform
-            if platform.system() != "Windows":
-                ready, _, _ = select.select([self._proc.stdout], [], [], 0)
-                if ready:
-                    peek = self._read_line()
-                    if peek.startswith("GAME_OVER "):
-                        result["game_over"] = peek[10:]
-            else:
-                # On Windows, use a non-blocking read trick via a helper thread cache
-                pass  # game_over will be picked up on next poll
-
-        return result
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def init(self) -> dict:
-        """Reset board, returns response dict with 'board' key."""
-        self._send("INIT")
-        return self._read_response()
-
-    def move(self, mv: str) -> dict:
+    def make_move(self, from_sq: str, to_sq: str,
+                  promotion: str | None = None) -> tuple[bool, str]:
         """
-        Apply player move.  mv is algebraic like 'e2e4' or 'e7e8Q'.
-        Returns dict with 'board' key, possibly 'game_over', or 'error'.
+        Ask the engine to play a player move.
+        `promotion` is a single character: 'q' | 'r' | 'b' | 'n' (or None).
+        Returns (success, raw_reply).
         """
-        self._send(f"MOVE {mv}")
-        return self._read_response()
+        move_str = from_sq + to_sq + (promotion or "")
+        reply = self._send(f"MOVE {move_str}")
+        return reply.startswith("MOVED"), reply
 
-    def ai_move(self) -> dict:
+    def ai_move(self) -> tuple[bool, str | None, str | None, str | None]:
         """
-        Ask engine for best move.
-        Returns dict with 'ai_move' and 'board', possibly 'game_over'.
+        Ask the engine to compute and play its best move.
+        Returns (success, from_sq, to_sq, promotion_char | None).
         """
-        self._send("AI_MOVE")
-        # Read AI_MOVE line then BOARD line
-        result = {}
-        while "board" not in result:
-            line = self._read_line()
-            if line.startswith("AI_MOVE "):
-                result["ai_move"] = line[8:]
-            elif line.startswith("BOARD "):
-                result["board"] = line[6:]
-            elif line.startswith("GAME_OVER "):
-                result["game_over"] = line[10:]
-        # Try to pick up game_over on Windows
-        if "game_over" not in result:
-            try:
-                line2 = self._read_line()   # will block briefly – but engine always sends it
-                # Only read if it's game-over; otherwise buffer it
-                if line2.startswith("GAME_OVER "):
-                    result["game_over"] = line2[10:]
-                # For simplicity we discard any other unexpected line here
-            except Exception:
-                pass
-        return result
+        reply = self._send("AI_MOVE")
+        if reply.startswith("AI_MOVED"):
+            parts = reply.split()
+            move  = parts[1]
+            from_sq = move[:2]
+            to_sq   = move[2:4]
+            promo   = move[4] if len(move) > 4 else None
+            return True, from_sq, to_sq, promo
+        return False, None, None, None
 
-    def legal_moves(self, sq: str) -> list:
-        """Returns list of legal destination square strings for piece on sq."""
-        self._send(f"LEGAL {sq}")
-        resp = self._read_response()
-        return resp.get("legal_moves", [])
+    def status(self) -> tuple[str | None, str | None]:
+        """
+        Query game state.
+        Returns (turn, state) e.g. ("white", "playing") or ("black", "checkmate").
+        """
+        reply = self._send("STATUS")
+        parts = reply.split()
+        if len(parts) == 3 and parts[0] == "STATUS":
+            return parts[1], parts[2]
+        return None, None
 
     def quit(self) -> None:
+        """Shut the engine down gracefully."""
         try:
             self._send("QUIT")
-            self._proc.wait(timeout=2)
         except Exception:
-            self._proc.kill()
+            pass
+        try:
+            self.proc.terminate()
+        except Exception:
+            pass

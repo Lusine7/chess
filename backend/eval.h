@@ -3,7 +3,12 @@
 
 #include "board.h"
 
-/* Returns score in centipawns from WHITE's perspective */
-int evaluate(Board *b);
+/*
+ * Static evaluation of the position.
+ * Returns a score in centipawns from White's perspective:
+ *   positive  -> good for White
+ *   negative  -> good for Black
+ */
+int evaluate(const Board *b);
 
-#endif
+#endif /* EVAL_H */
