@@ -1,6 +1,9 @@
 #include "ai.h"
 #include "eval.h"
 
+/* Runtime depth — default 4 (intermediate). Set via DEPTH command. */
+int ai_depth = 4;
+
 /* ------------------------------------------------------------------ */
 /*  minimax — recursive alpha-beta search                               */
 /*                                                                      */
@@ -25,8 +28,8 @@ static int minimax(Board *b, int depth, int alpha, int beta, int maximizing) {
              * Checkmate. Return a large score weighted by depth so the
              * engine prefers shorter mates (or delays being mated).
              */
-            return maximizing ? -INF + (AI_DEPTH - depth)
-                              :  INF - (AI_DEPTH - depth);
+            return maximizing ? -INF + (ai_depth - depth)
+                              :  INF - (ai_depth - depth);
         }
         return 0; /* Stalemate */
     }
@@ -75,7 +78,7 @@ int find_best_move(Board *b, Move *best) {
         copy_board(&tmp, b);
         apply_move(&tmp, &moves[i]);
 
-        int score = minimax(&tmp, AI_DEPTH - 1, -INF, INF, !maximizing);
+        int score = minimax(&tmp, ai_depth - 1, -INF, INF, !maximizing);
 
         if (maximizing ? (score > best_score) : (score < best_score)) {
             best_score = score;

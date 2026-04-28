@@ -44,6 +44,13 @@ class ChessProtocol:
         """Reset the board to the starting position."""
         return self._send("INIT") == "OK"
 
+    def set_depth(self, depth: int) -> bool:
+        """
+        Set the AI search depth (2 = easy, 4 = intermediate, 6 = hard).
+        Must be called after init() so the engine is ready.
+        """
+        return self._send(f"DEPTH {depth}") == "OK"
+
     def get_moves(self, square: str) -> list[str]:
         """
         Return a list of legal destination squares for the piece on `square`.

@@ -63,10 +63,12 @@ class GameState:
         Which side the human plays.  AI takes the other side.
     """
 
-    def __init__(self, player_color: str = "white"):
+    def __init__(self, player_color: str = "white", depth: int = 4):
         self.player_color = player_color
+        self.depth        = depth
         self.engine       = ChessProtocol(BINARY_PATH)
         self.engine.init()
+        self.engine.set_depth(depth)
 
         self.board: list[list[str]] = _starting_board()
 
@@ -162,6 +164,7 @@ class GameState:
     def restart(self) -> None:
         """Reset everything for a new game."""
         self.engine.init()
+        self.engine.set_depth(self.depth)
         self.board         = _starting_board()
         self.selected_sq   = None
         self.legal_dests   = []

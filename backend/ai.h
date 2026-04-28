@@ -4,13 +4,13 @@
 #include "board.h"
 #include "moves.h"
 
+#define INF 1000000
+
 /*
- * Search depth.  4 ply is strong enough to be challenging while still
- * responding in reasonable time (<2 s on modern hardware).
- * Increase for a stronger (but slower) engine.
+ * Runtime search depth — set by the DEPTH <n> command from the frontend.
+ * Defaults to 4 (intermediate).  Supported values: 2 (easy), 4, 6 (hard).
  */
-#define AI_DEPTH 4
-#define INF      1000000
+extern int ai_depth;
 
 /*
  * Finds the best move for b->turn using minimax + alpha-beta pruning.

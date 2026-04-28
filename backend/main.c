@@ -111,6 +111,26 @@ static void handle_move(const char *arg) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  DEPTH <n>  — set runtime search depth (2 / 4 / 6)                 */
+/* ------------------------------------------------------------------ */
+static void handle_depth(const char *arg) {
+    if (!arg) {
+        printf("ERROR missing depth\n");
+        fflush(stdout);
+        return;
+    }
+    int d = atoi(arg);
+    if (d < 1 || d > 20) {
+        printf("ERROR depth out of range\n");
+        fflush(stdout);
+        return;
+    }
+    ai_depth = d;
+    printf("OK\n");
+    fflush(stdout);
+}
+
+/* ------------------------------------------------------------------ */
 /*  AI_MOVE — engine picks and plays the best move                     */
 /* ------------------------------------------------------------------ */
 static void handle_ai_move(void) {
@@ -179,12 +199,13 @@ int main(void) {
         while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
             line[--len] = '\0';
 
-        if      (strcmp(line, "INIT")       == 0) handle_init();
-        else if (strncmp(line, "MOVES ", 6) == 0) handle_moves(line + 6);
-        else if (strncmp(line, "MOVE ",  5) == 0) handle_move(line + 5);
-        else if (strcmp(line, "AI_MOVE")    == 0) handle_ai_move();
-        else if (strcmp(line, "STATUS")     == 0) handle_status();
-        else if (strcmp(line, "QUIT")       == 0) break;
+        if      (strcmp(line, "INIT")        == 0) handle_init();
+        else if (strncmp(line, "DEPTH ",  6) == 0) handle_depth(line + 6);
+        else if (strncmp(line, "MOVES ",  6) == 0) handle_moves(line + 6);
+        else if (strncmp(line, "MOVE ",   5) == 0) handle_move(line + 5);
+        else if (strcmp(line, "AI_MOVE")     == 0) handle_ai_move();
+        else if (strcmp(line, "STATUS")      == 0) handle_status();
+        else if (strcmp(line, "QUIT")        == 0) break;
         else {
             printf("ERROR unknown command\n");
             fflush(stdout);
