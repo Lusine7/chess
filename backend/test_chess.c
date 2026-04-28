@@ -901,6 +901,131 @@ static void test_ai_move_does_not_leave_king_in_check(void) {
 }
 
 /* ================================================================== */
+/*  Added tests                                                  */
+/* ================================================================== */
+
+/* 1. Black pawn promotion — move generation emits 4 variants */
+static void test_black_promotion_generates_four_moves(void) {
+    SUITE("pawn — black promotion generates 4 variants");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = BLACK;
+
+    place(&b, 1, 3, -PAWN);   /* black pawn on d2, one push from promotion */
+    place(&b, 0, 0,  KING);
+    place(&b, 7, 7, -KING);   /* keep d1 clear so the pawn can promote */
+
+    int n = legal_moves_from(&b, 1, 3);
+    CHECK_EQ(n, 4);  /* Q, R, B, N */
+}
+
+/* 2. Black en passant */
+static void test_black_en_passant(void) {
+    SUITE("pawn — black en passant");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = BLACK;
+
+    /* Black pawn on d4, white pawn just double-pushed to e4 */
+    place(&b, 3, 3, -PAWN);   /* d4 */
+    place(&b, 3, 4,  PAWN);   /* e4 (just landed) */
+    place(&b, 0, 0,  KING);
+    place(&b, 7, 7, -KING);
+    b.ep_rank = 2;             /* en-passant target: e3 */
+    b.ep_file = 4;
+
+    CHECK(has_legal_move(&b, 3, 3, 2, 4)); /* black captures en passant */
+
+    /* After capture, white pawn on e4 must be removed */
+    Move m = { 3, 3, 2, 4, 0 };
+    apply_move(&b, &m);
+    CHECK_EQ(b.squares[3][4], EMPTY);  /* e4 pawn removed */
+    CHECK_EQ(b.squares[2][4], -PAWN);  /* black pawn on e3 */
+}
+
+/* 3. Black queenside castling */
+static void test_castling_queenside_black(void) {
+    SUITE("castling — black queenside");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn           = BLACK;
+    b.black_castle_q = 1;
+    b.black_castle_k = 1;
+
+    place(&b, 7, 4, -KING);
+    place(&b, 7, 0, -ROOK);
+    place(&b, 0, 4,  KING);
+
+    CHECK(has_legal_move(&b, 7, 4, 7, 2));
+
+    Move m = { 7, 4, 7, 2, 0 };
+    apply_move(&b, &m);
+    CHECK_EQ(b.squares[7][2], -KING);  /* king on c8 */
+    CHECK_EQ(b.squares[7][3], -ROOK);  /* rook on d8 */
+    CHECK_EQ(b.squares[7][0], EMPTY);
+    CHECK_EQ(b.squares[7][4], EMPTY);
+}
+
+/* 4. Capturing a rook on its home square revokes that side's castling right */
+static void test_rook_capture_revokes_castling(void) {
+    SUITE("castling — rook capture revokes castling right");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn = BLACK;
+
+    /* White has both rooks on home squares */
+    place(&b, 0, 0,  ROOK);
+    place(&b, 0, 7,  ROOK);
+    place(&b, 0, 4,  KING);
+    /* Black queen captures the a1 rook */
+    place(&b, 3, 0, -QUEEN);
+    place(&b, 7, 4, -KING);
+
+    Move m = { 3, 0, 0, 0, 0 };  /* Qa4xa1 */
+    apply_move(&b, &m);
+
+    CHECK_EQ(b.white_castle_q, 0);  /* queenside right revoked */
+    CHECK_EQ(b.white_castle_k, 1);  /* kingside right intact */
+}
+
+/* 5. AI avoids hanging its own piece (depth 3) */
+static void test_ai_avoids_hanging_piece(void) {
+    SUITE("find_best_move — avoids leaving a piece hanging");
+    Board b;
+    board_init(&b);
+    clear_pieces(&b);
+    b.turn   = WHITE;
+    ai_depth = 3;
+
+    /*
+     * White rook on a4, black rook on a8 — if white plays any move that
+     * keeps the rook on the a-file it will be captured.  The AI should
+     * move the rook off the a-file (or do something else) and verify
+     * the resulting position is not obviously losing.
+     * Simple check: the chosen move must not leave white's own king in check.
+     */
+    place(&b, 0, 4,  KING);
+    place(&b, 3, 0,  ROOK);   /* white rook a4 */
+    place(&b, 7, 0, -ROOK);   /* black rook a8 attacks down the file */
+    place(&b, 7, 4, -KING);
+
+    Move best;
+    int ok = find_best_move(&b, &best);
+    CHECK_EQ(ok, 1);
+
+    Board after;
+    copy_board(&after, &b);
+    apply_move(&after, &best);
+    CHECK(!is_in_check(&after, WHITE));
+    /* The rook should no longer be on a4 (moved away from capture) */
+    CHECK(after.squares[3][0] != ROOK);
+}
+
+/* ================================================================== */
 /*  main — register and run all tests                                  */
 /* ================================================================== */
 
@@ -956,6 +1081,12 @@ static const TestFn tests[] = {
     test_ai_takes_free_piece,
     test_ai_finds_checkmate_in_one,
     test_ai_move_does_not_leave_king_in_check,
+    /* added tests — black-side symmetry + edge cases */
+    test_black_promotion_generates_four_moves,
+    test_black_en_passant,
+    test_castling_queenside_black,
+    test_rook_capture_revokes_castling,
+    test_ai_avoids_hanging_piece,
 };
 
 int main(void) {
