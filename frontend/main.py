@@ -248,10 +248,10 @@ def run_setup_screen(screen: pygame.Surface, clock: pygame.time.Clock):
 
 def _trigger_ai(game: GameState) -> None:
     """
-    Called once per frame when it's the AI's turn.
-    Synchronous — minimax is fast enough at the supported depths.
+    Start the AI move in a background thread so the event loop
+    stays responsive while the engine is searching at any depth.
     """
-    game.request_ai_move()
+    game.start_ai_move_async()
 
 
 # ------------------------------------------------------------------ #
@@ -318,13 +318,21 @@ def main() -> None:
         # ---- Rendering --------------------------------------------- #
         screen.fill((20, 20, 20))    # background behind board
 
+        # Show a live "thinking" status while the engine is searching
+        if game.ai_thinking:
+            import math, time as _time
+            dots = "." * (int(_time.time() * 2) % 4)
+            status_text = f"⏳  AI is thinking{dots}"
+        else:
+            status_text = game.status_text
+
         renderer.draw(
             board_state   = game.board,
             selected_sq   = game.selected_sq,
             legal_dests   = game.legal_dests,
             last_move     = game.last_move,
             in_check_sq   = game.in_check_sq,
-            status_text   = game.status_text,
+            status_text   = status_text,
             turn_color    = game.turn,
             game_over     = game.game_over_msg,
             promo_pending = game.promo_pending,

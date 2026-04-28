@@ -16,7 +16,7 @@ Piece encoding (mirrors the C backend):
 from __future__ import annotations
 from protocol import ChessProtocol
 from typing   import Optional
-import os, sys
+import os, sys, threading
 
 # ------------------------------------------------------------------ #
 #  Path to compiled binary                                             #
@@ -160,6 +160,20 @@ class GameState:
 
         self._refresh_status()
         self.needs_ai_move = False
+
+    def start_ai_move_async(self) -> None:
+        """
+        Fire the AI move computation in a daemon thread so the Pygame
+        event loop keeps running (and can render a 'thinking' indicator)
+        while the engine is searching.  Safe to call once per AI turn.
+        """
+        self.ai_thinking = True
+        t = threading.Thread(target=self._run_ai_move, daemon=True)
+        t.start()
+
+    def _run_ai_move(self) -> None:
+        """Thread worker — delegates to the existing synchronous method."""
+        self.request_ai_move()
 
     def restart(self) -> None:
         """Reset everything for a new game."""
