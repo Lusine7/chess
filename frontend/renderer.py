@@ -154,10 +154,11 @@ def _make_piece_surface(piece_char: str, sq: int) -> pygame.Surface:
 # ================================================================== #
 
 class Renderer:
-    def __init__(self, screen: pygame.Surface, board_size: int):
+    def __init__(self, screen: pygame.Surface, board_size: int, flipped: bool = False):
         self.screen     = screen
         self.board_size = board_size
         self.sq_size    = board_size // 8
+        self.flipped    = flipped          # True when player plays as black
         self._cache: dict[str, pygame.Surface] = {}
         self._overlay   = pygame.Surface((board_size, board_size), pygame.SRCALPHA)
         self._init_fonts()
@@ -173,12 +174,20 @@ class Renderer:
     # ---------------------------------------------------------------- #
 
     def sq_to_px(self, rank: int, file: int):
-        return file * self.sq_size, (7 - rank) * self.sq_size
+        if self.flipped:
+            # Black at bottom: rank 7 → row 0, file 7 → col 0
+            return (7 - file) * self.sq_size, rank * self.sq_size
+        else:
+            # White at bottom: rank 0 → row 7, file 0 → col 0
+            return file * self.sq_size, (7 - rank) * self.sq_size
 
     def px_to_sq(self, px: int, py: int) -> Optional[tuple]:
         if not (0 <= px < self.board_size and 0 <= py < self.board_size):
             return None
-        return 7 - py // self.sq_size, px // self.sq_size
+        if self.flipped:
+            return py // self.sq_size, 7 - px // self.sq_size
+        else:
+            return 7 - py // self.sq_size, px // self.sq_size
 
     # ---------------------------------------------------------------- #
     #  Main draw                                                        #
@@ -243,11 +252,13 @@ class Renderer:
 
     def _draw_coords(self):
         sq = self.sq_size
+        files = "hgfedcba" if self.flipped else "abcdefgh"
         for i in range(8):
-            fl = self.font_coord.render("abcdefgh"[i], True, (80, 80, 80))
+            fl = self.font_coord.render(files[i], True, (80, 80, 80))
             self.screen.blit(fl, (i*sq + sq - fl.get_width() - 3,
                                   self.board_size - fl.get_height() - 3))
-            rk = self.font_coord.render(str(8 - i), True, (80, 80, 80))
+            rank_num = str(i + 1) if self.flipped else str(8 - i)
+            rk = self.font_coord.render(rank_num, True, (80, 80, 80))
             self.screen.blit(rk, (3, i*sq + 3))
 
     # ---------------------------------------------------------------- #

@@ -389,7 +389,7 @@ def main() -> None:
     player_color, depth = run_setup_screen(screen, clock)
 
     pygame.display.set_caption(WINDOW_TITLE)
-    renderer    = Renderer(screen, BOARD_SIZE)
+    renderer    = Renderer(screen, BOARD_SIZE, flipped=(player_color == "black"))
     game        = GameState(player_color=player_color, depth=depth)
     promo_hover: str | None = None
 
@@ -405,6 +405,8 @@ def main() -> None:
                     game.engine.quit()
                     player_color, depth = run_setup_screen(screen, clock)
                     pygame.display.set_caption(WINDOW_TITLE)
+                    renderer    = Renderer(screen, BOARD_SIZE,
+                                           flipped=(player_color == "black"))
                     game        = GameState(player_color=player_color,
                                             depth=depth)
                     promo_hover = None
