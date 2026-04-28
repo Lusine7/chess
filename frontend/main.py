@@ -30,7 +30,7 @@ BOARD_SIZE   = 640
 WINDOW_W     = BOARD_SIZE
 WINDOW_H     = BOARD_SIZE + STATUS_HEIGHT
 FPS          = 60
-WINDOW_TITLE = "Chess - AI opponent (minimax + a-b)"
+WINDOW_TITLE = "Chess"
 
 # ------------------------------------------------------------------ #
 #  Palette                                                             #

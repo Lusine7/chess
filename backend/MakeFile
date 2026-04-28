@@ -4,7 +4,10 @@ TARGET  = chess
 SRCS    = main.c board.c moves.c eval.c ai.c
 OBJS    = $(SRCS:.c=.o)
 
-.PHONY: all clean
+PYTHON  = python3
+PIP     = pip3
+
+.PHONY: all clean setup run
 
 all: $(TARGET)
 
@@ -20,6 +23,14 @@ board.o: board.c board.h
 moves.o: moves.c moves.h board.h
 eval.o:  eval.c  eval.h  board.h
 ai.o:    ai.c    ai.h    board.h moves.h eval.h
+
+# Install Python dependencies
+setup:
+	$(PIP) install -r ../requirements.txt
+
+# Build backend and launch the game
+run: all
+	cd ../frontend && $(PYTHON) main.py
 
 clean:
 	rm -f $(OBJS) $(TARGET)

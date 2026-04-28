@@ -1,10 +1,40 @@
 """
 renderer.py — Pygame-based chess board renderer.
-Pieces are drawn with pygame primitives (no Unicode font dependency).
+Pieces are rendered from PNG images when available (run setup_pieces.py
+first), falling back to pygame-primitive drawing otherwise.
 """
 
+import os
 import pygame
 from typing import Optional
+
+# ------------------------------------------------------------------ #
+#  Piece image loading (module-level, initialised once)               #
+# ------------------------------------------------------------------ #
+_PIECE_IMAGES: dict = {}   # piece_char -> raw Surface (original size)
+_IMAGES_LOADED = False
+
+# Map piece characters to the filenames produced by setup_pieces.py
+_PIECE_FILENAMES = {
+    'K': 'wK', 'Q': 'wQ', 'R': 'wR', 'B': 'wB', 'N': 'wN', 'P': 'wP',
+    'k': 'bK', 'q': 'bQ', 'r': 'bR', 'b': 'bB', 'n': 'bN', 'p': 'bP',
+}
+
+
+def _load_piece_images() -> None:
+    """Load PNG pieces from frontend/assets/pieces/ (if they exist)."""
+    global _PIECE_IMAGES, _IMAGES_LOADED
+    if _IMAGES_LOADED:
+        return
+    _IMAGES_LOADED = True
+    assets_dir = os.path.join(os.path.dirname(__file__), "assets", "pieces")
+    for char, stem in _PIECE_FILENAMES.items():
+        path = os.path.join(assets_dir, f"{stem}.png")
+        if os.path.isfile(path):
+            try:
+                _PIECE_IMAGES[char] = pygame.image.load(path).convert_alpha()
+            except Exception:
+                pass  # silently fall back to primitive drawing
 
 # ------------------------------------------------------------------ #
 #  Colour palette                                                      #
@@ -133,6 +163,19 @@ _DRAW_FN = {
 
 
 def _make_piece_surface(piece_char: str, sq: int) -> pygame.Surface:
+    # ── PNG image path ──────────────────────────────────────────────
+    if piece_char in _PIECE_IMAGES:
+        margin = max(3, sq // 14)          # small breathing room
+        inner  = sq - 2 * margin
+        scaled = pygame.transform.smoothscale(
+            _PIECE_IMAGES[piece_char], (inner, inner)
+        )
+        surf = pygame.Surface((sq, sq), pygame.SRCALPHA)
+        surf.fill((0, 0, 0, 0))
+        surf.blit(scaled, (margin, margin))
+        return surf
+
+    # ── Primitive fallback ──────────────────────────────────────────
     surf = pygame.Surface((sq, sq), pygame.SRCALPHA)
     surf.fill((0, 0, 0, 0))
     is_white = piece_char.isupper()
@@ -161,6 +204,7 @@ class Renderer:
         self.flipped    = flipped          # True when player plays as black
         self._cache: dict[str, pygame.Surface] = {}
         self._overlay   = pygame.Surface((board_size, board_size), pygame.SRCALPHA)
+        _load_piece_images()               # no-op if already done
         self._init_fonts()
 
     def _init_fonts(self):

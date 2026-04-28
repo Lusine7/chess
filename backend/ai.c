@@ -1,13 +1,18 @@
+/* this is the main part generating the best move for the AI*/
+/* it gets the initial depth, then runs the minimax algorithm with alpha-beta pruning with that depth*/
+/* it then returns the best move that it found */
+/* Includes two functions: minimax and find_best_move. find_best_move is called by the frontend, and uses the minimax function.*/
+
 #include "ai.h"
 #include "eval.h"
 
-/* Runtime depth — default 4 (intermediate). Set via DEPTH command. */
+/* Runtime depth — we default to 4 (intermediate). Though via pygame it is later set via DEPTH command. */
 int ai_depth = 4;
 
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------    */
 /*  minimax — recursive alpha-beta search                               */
 /*                                                                      */
-/*  depth      : plies remaining (0 = leaf, return static eval)        */
+/*  depth      : plies remaining (0 = leaf, return static evaluation)   */
 /*  alpha      : best score the maximiser can already guarantee        */
 /*  beta       : best score the minimiser can already guarantee        */
 /*  maximizing : 1 if it's White's turn to move at this node           */
