@@ -7,7 +7,7 @@
 #define INF 1000000
 
 /*
- * Runtime search depth — set by the DEPTH <n> command from the frontend.
+ * Runtime search depth which gets the DEPTH <n> command from the frontend.
  * Defaults to 4 (intermediate).  Supported values: 2 (easy), 4, 6 (hard).
  */
 extern int ai_depth;

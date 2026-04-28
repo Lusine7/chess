@@ -19,7 +19,7 @@ int ai_depth = 4;
 /* ------------------------------------------------------------------ */
 static int minimax(Board *b, int depth, int alpha, int beta, int maximizing) {
 
-    /* ---- Leaf node: return static evaluation ---- */
+    /* ---- Leaf node: return evaluation ---- */
     if (depth == 0)
         return evaluate(b);
 
