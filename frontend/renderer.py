@@ -125,7 +125,7 @@ class Renderer:
                          last_move, in_check_sq)
         self._draw_status_bar(status_text, turn_color)
         if promo_pending:
-            self._draw_promo_dialog(promo_hover)
+            self._draw_promo_dialog(promo_hover, turn_color)
         elif game_over:
             self._draw_overlay(game_over)
 
@@ -208,7 +208,7 @@ class Renderer:
 
     PROMO_NAMES = {'q': 'Queen', 'r': 'Rook', 'b': 'Bishop', 'n': 'Knight'}
 
-    def _draw_promo_dialog(self, hover: Optional[str]):
+    def _draw_promo_dialog(self, hover: Optional[str], turn_color: str = "white"):
         sq      = self.sq_size
         n       = len(PROMO_PIECES)
         box_w   = sq
@@ -227,8 +227,8 @@ class Renderer:
             bg  = PROMO_HOVER if hover == piece else PROMO_BG
             pygame.draw.rect(self.screen, bg,      (bx, by, box_w, box_h), border_radius=6)
             pygame.draw.rect(self.screen, PROMO_BDR,(bx, by, box_w, box_h), 2, border_radius=6)
-            # Draw piece icon (white queen promotion)
-            icon_char = piece.upper()
+            # Draw piece icon using the correct color (upper = white, lower = black)
+            icon_char = piece.upper() if turn_color == "white" else piece
             icon = _make_piece_surface(icon_char, sq)
             self.screen.blit(icon, (bx, by))
             # Label
