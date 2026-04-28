@@ -283,10 +283,10 @@ static void test_checkmate_no_moves(void) {
     Board b;
     board_init(&b);
     /* 1.f3 e5  2.g4 Qh4# */
-    apply_move(&b, &(Move){1,5,2,5,0}); /* f3 */
-    apply_move(&b, &(Move){6,4,4,4,0}); /* e5 */
-    apply_move(&b, &(Move){1,6,3,6,0}); /* g4 */
-    apply_move(&b, &(Move){7,3,4,7,0}); /* Qh4 */
+    apply_move(&b, &(Move){1,5,2,5,0}); /* f3  (f2-f3) */
+    apply_move(&b, &(Move){6,4,4,4,0}); /* e5  (e7-e5) */
+    apply_move(&b, &(Move){1,6,3,6,0}); /* g4  (g2-g4) */
+    apply_move(&b, &(Move){7,3,3,7,0}); /* Qh4 (d8-h4) — rank index 3 = chess rank 4 */
 
     /* Now it's White's turn and White is in checkmate */
     Move moves[MAX_MOVES];
