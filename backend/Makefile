@@ -1,0 +1,57 @@
+CC      = gcc
+CFLAGS  = -Wall -Wextra -O2 -std=c11
+TARGET  = chess
+SRCS    = main.c board.c moves.c eval.c ai.c
+OBJS    = $(SRCS:.c=.o)
+
+PYTHON  = python3
+PIP     = pip3
+
+.PHONY: all clean setup run test test_py test_all
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Header dependencies
+main.o:  main.c  board.h moves.h ai.h
+board.o: board.c board.h
+moves.o: moves.c moves.h board.h
+eval.o:  eval.c  eval.h  board.h
+ai.o:    ai.c    ai.h    board.h moves.h eval.h
+
+# Install Python dependencies
+setup:
+	$(PIP) install -r ../requirements.txt
+
+# Build backend and launch the game
+run: all
+	cd ../frontend && $(PYTHON) main.py
+
+# Build and run unit tests (excludes main.c so there is no duplicate main)
+TEST_SRCS = board.c moves.c eval.c ai.c test_chess.c
+TEST_OBJS = $(TEST_SRCS:.c=.o)
+TEST_BIN  = test_chess
+
+test: $(TEST_BIN)
+	./$(TEST_BIN)
+
+# Run Python unit tests (no binary required — uses unittest.mock)
+test_py:
+	$(PYTHON) ../frontend/test_protocol.py -v
+
+# Run both C and Python test suites
+test_all: test test_py
+
+$(TEST_BIN): $(TEST_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+test_chess.o: test_chess.c board.h moves.h eval.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+clean:
+	rm -f $(OBJS) $(TARGET) $(TEST_OBJS) $(TEST_BIN)
